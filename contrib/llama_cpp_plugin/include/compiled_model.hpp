@@ -1,3 +1,5 @@
+#ifndef LLAMA_CPP_COMPILED_MODEL_HPP
+#define LLAMA_CPP_COMPILED_MODEL_HPP
 
 #include "openvino/runtime/icompiled_model.hpp"
 
@@ -10,21 +12,21 @@ namespace ov {
              *
              * @param model output stream
              */
-            virtual void export_model(std::ostream& model) const = 0;
+            virtual void export_model(std::ostream& model) const override;
 
             /**
              * @brief Returns runtime model
              *
              * @return OpenVINO Model which represents runtime graph
              */
-            virtual std::shared_ptr<const ov::Model> get_runtime_model() const = 0;
+            virtual std::shared_ptr<const ov::Model> get_runtime_model() const override;
 
             /**
              * @brief Allows to set property
              *
              * @param properties new plugin properties
              */
-            virtual void set_property(const ov::AnyMap& properties) = 0;
+            virtual void set_property(const ov::AnyMap& properties) override;
 
             /**
              * @brief Returns property
@@ -33,7 +35,7 @@ namespace ov {
              *
              * @return Property value
              */
-            virtual ov::Any get_property(const std::string& name) const = 0;
+            virtual ov::Any get_property(const std::string& name) const override;
 
 
         protected:
@@ -42,7 +44,9 @@ namespace ov {
              *
              * @return Sync infer request
              */
-            virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const = 0;
+            virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
         };
     }
 }  // namespace ov
+
+#endif  // LLAMA_CPP_COMPILED_MODEL_HPP

@@ -5,14 +5,13 @@
 #ifndef LLAMA_CPP_PLUGIN_HPP
 #define LLAMA_CPP_PLUGIN_HPP
 
-#include <memory>
-
 #include "openvino/runtime/iplugin.hpp"
 
 namespace ov {
     namespace llama_cpp_plugin {
-        class LlamaCppPlugin : public std::enable_shared_from_this<IPlugin> {
+        class LlamaCppPlugin : public IPlugin {
         public:
+            LlamaCppPlugin();
             /**
              * @brief Compiles model from ov::Model object
              * @param model A model object acquired from ov::Core::read_model or source construction
@@ -98,6 +97,8 @@ namespace ov {
              */
             virtual ov::SupportedOpsMap query_model(const std::shared_ptr<const ov::Model>& model,
                 const ov::AnyMap& properties) const override;
+        };
+    }  // namespace llama_cpp_plugin
 }  // namespace ov
 
 /**
