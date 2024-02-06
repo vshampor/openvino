@@ -7,6 +7,11 @@ namespace ov {
     namespace llama_cpp_plugin {
         class LlamaCppModel: public ICompiledModel {
         public:
+            LlamaCppModel(const std::shared_ptr<ov::Model>& model,
+                          const std::shared_ptr<const ov::IPlugin>& plugin,
+                          const ov::SoPtr<ov::IRemoteContext>& context,
+                          const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
+                          ): ICompiledModel(model, plugin, context, task_executor) {};
             /**
              * @brief Export compiled model to stream
              *
@@ -34,7 +39,8 @@ namespace ov {
              * @param name Property name
              *
              * @return Property value
-             */
+             *              virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
+            **/
             virtual ov::Any get_property(const std::string& name) const override;
 
 

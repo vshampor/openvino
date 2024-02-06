@@ -1,4 +1,14 @@
 #include "plugin.hpp"
+#include "compiled_model.hpp"
+
+
+namespace {
+static constexpr const char* wait_executor_name = "LlamaCppWaitExecutor";
+static constexpr const char* stream_executor_name = "LlamaCppStreamsExecutor";
+static constexpr const char* template_exclusive_executor = "LlamaCppExecutor";
+}  // namespace
+
+
 namespace ov {
     namespace llama_cpp_plugin {
         LlamaCppPlugin::LlamaCppPlugin() : IPlugin() {
@@ -6,15 +16,15 @@ namespace ov {
         }
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties) const {
-            std::cout << "VSHAMPOR: compile_model called in C++" << std::endl;
-            return std::shared_ptr<ov::ICompiledModel>();
+            return compile_model(model, properties, {});
         }
 
 
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties,
             const ov::SoPtr<ov::IRemoteContext>& context) const {
-            OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+            std::cout << "VSHAMPOR: compile_model called in C++" << std::endl;
+            return std::make_shared<LlamaCppModel>(model->clone(), shared_from_this(), context, get_executor_manager()->get_executor(template_exclusive_executor));
         }
 
         void LlamaCppPlugin::set_property(const ov::AnyMap& properties) {

@@ -11,10 +11,13 @@ namespace ov {
             }
 
             void LlamaCppModel::set_property(const ov::AnyMap& properties) {
-                OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+                std::cout << "VSHAMPOR: attempted to set_property (did nothing)";
             }
 
             ov::Any LlamaCppModel::get_property(const std::string& name) const {
+                if (ov::supported_properties == name) {
+                    return decltype(ov::supported_properties)::value_type(std::vector<PropertyName>());
+                }
                 OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
             }
 

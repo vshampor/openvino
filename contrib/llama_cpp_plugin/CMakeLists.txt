@@ -11,6 +11,7 @@ if(CMAKE_COMPILER_IS_GNUCXX)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(ENABLE_TESTS)
     include(CTest)
@@ -20,6 +21,7 @@ if(ENABLE_TESTS)
         add_subdirectory(tests/functional)
     endif()
 endif()
+
 
 # install
 
