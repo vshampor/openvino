@@ -1,4 +1,5 @@
 #include "compiled_model.hpp"
+#include "infer_request.hpp"
 
 namespace ov {
     namespace llama_cpp_plugin {
@@ -22,7 +23,7 @@ namespace ov {
             }
 
             std::shared_ptr<ov::ISyncInferRequest> LlamaCppModel::create_sync_infer_request() const {
-                OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+                 return std::make_shared<LlamaCppSyncInferRequest>(std::static_pointer_cast<const LlamaCppModel>(shared_from_this()));
             }
     }
 }  // namespace ov

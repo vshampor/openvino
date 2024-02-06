@@ -16,6 +16,7 @@ namespace ov {
         }
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties) const {
+            std::cout << "VSHAMPOR: LlamaCppPlugin::compile_model" << std::endl;
             return compile_model(model, properties, {});
         }
 

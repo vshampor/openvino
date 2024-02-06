@@ -101,20 +101,4 @@ namespace ov {
     }  // namespace llama_cpp_plugin
 }  // namespace ov
 
-/**
- * @def OV_DEFINE_PLUGIN_CREATE_FUNCTION(PluginType, version)
- * @brief Defines the exported `OV_CREATE_PLUGIN` function which is used to create a plugin instance
- * @ingroup ov_dev_api_plugin_api
- */
-#define OV_DEFINE_PLUGIN_CREATE_FUNCTION(PluginType, version, ...)                                       \
-    OPENVINO_PLUGIN_API void OV_CREATE_PLUGIN(::std::shared_ptr<::ov::IPlugin>& plugin) noexcept(false); \
-    void OV_CREATE_PLUGIN(::std::shared_ptr<::ov::IPlugin>& plugin) noexcept(false) {                    \
-        try {                                                                                            \
-            plugin = ::std::make_shared<PluginType>(__VA_ARGS__);                                        \
-            plugin->set_version(version);                                                                \
-        } catch (const std::exception& ex) {                                                             \
-            OPENVINO_THROW(ex.what());                                                                   \
-        }                                                                                                \
-    }
-
-#endif
+#endif // LLAMA_CPP_PLUGIN_HPP
