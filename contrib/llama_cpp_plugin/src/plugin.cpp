@@ -17,6 +17,29 @@ namespace ov {
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties) const {
             std::cout << "VSHAMPOR: LlamaCppPlugin::compile_model" << std::endl;
+            auto ops = model->get_ops();
+            auto iter = std::find_if(ops.begin(), ops.end(), [](const std::shared_ptr<ov::Node>& val) {
+                    return val->get_friendly_name().find("transformer.h.9.attn.c_proj.weight") != std::string::npos; });
+            if (iter == ops.end()) {
+                std::cout << "VSHAMPOR: did not find the node\n";
+            } else {
+                std::shared_ptr<ov::Node> node_with_tensor = *iter;
+                std::cout << "VSHAMPOR: node type is " << node_with_tensor->get_type_name() << std::endl;
+                ov::descriptor::Tensor& tensor_descr = node_with_tensor->get_output_tensor(0);
+                std::cout << "VSHAMPOR: node output tensor shape is " << tensor_descr.get_shape().to_string() << std::endl;
+                ov::TensorVector in, out;
+                node_with_tensor->evaluate(out, in);
+                std::cout << "VSHAMPOR: evaluated " << out.size() << " output tensors\n";
+                if (!out.empty()) {
+                    const ov::Tensor& tensor = out[0];
+                    const float* vals = tensor.data<float>();
+                    std::cout << "VSHAMPOR: first elements of the weight tensor are ";
+                    for (size_t i = 0; i < 10; i++) {
+                        std::cout << vals[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+            }
             return compile_model(model, properties, {});
         }
 

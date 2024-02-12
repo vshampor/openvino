@@ -21,12 +21,16 @@ ov_mark_target_as_cc(${TARGET_NAME})
 
 target_include_directories(${TARGET_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${OpenVINOTemplatePlugin_SOURCE_DIR}/include")
+    "${LlamaCppPlugin_SOURCE_DIR}/include")
 
 # link common OpenVINO Runtime libraries
 target_link_libraries(${TARGET_NAME} PRIVATE
     openvino::interpreter_backend
     openvino::reference)
+
+# include and link llama.cpp code
+target_link_libraries(${TARGET_NAME} PRIVATE llama)
+
 
 set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE ${ENABLE_LTO})
 

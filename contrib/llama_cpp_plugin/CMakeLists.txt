@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 
-project(OpenVINOTemplatePlugin)
+project(LlamaCppPlugin)
 
 find_package(OpenVINODeveloperPackage REQUIRED)
 
@@ -12,6 +12,8 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(tools)
+
+add_subdirectory(third_party/llama.cpp)
 
 if(ENABLE_TESTS)
     include(CTest)

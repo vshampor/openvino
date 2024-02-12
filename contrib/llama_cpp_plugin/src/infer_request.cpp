@@ -1,5 +1,6 @@
 #include "infer_request.hpp"
 #include "openvino/runtime/make_tensor.hpp"
+#include "llama.h"
 
 namespace ov {
     namespace llama_cpp_plugin {
@@ -42,6 +43,9 @@ namespace ov {
         std::cout << "VSHAMPOR: infer() called\n";
         auto& logit_output = get_outputs()[0];
         allocate_tensor(logit_output, [logit_output](ov::SoPtr<ov::ITensor>& tensor) { allocate_tensor_impl(tensor, logit_output.get_element_type(), ov::Shape{1, 42}); });
+        std::cout << "VSHAMPOR: output tensors allocated\n";
+        llama_model_params params = llama_model_default_params();
+        std::cout << "VSHAMPOR: llama_model_params instantiated\n";
     };
     std::vector<ov::ProfilingInfo> LlamaCppSyncInferRequest::get_profiling_info() const {
         std::cout << "VSHAMPOR: get_profiling_info() called\n";
