@@ -11,7 +11,7 @@ namespace ov {
                           const std::shared_ptr<const ov::IPlugin>& plugin,
                           const ov::SoPtr<ov::IRemoteContext>& context,
                           const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
-                          ): ICompiledModel(model, plugin, context, task_executor) {};
+                          );
             /**
              * @brief Export compiled model to stream
              *

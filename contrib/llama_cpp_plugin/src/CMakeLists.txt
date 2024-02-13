@@ -28,8 +28,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     openvino::interpreter_backend
     openvino::reference)
 
-# include and link llama.cpp code
+# include and link llama.cpp  and ggml code
 target_link_libraries(${TARGET_NAME} PRIVATE llama)
+target_link_libraries(${TARGET_NAME} PRIVATE ggml)
 
 
 set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE ${ENABLE_LTO})
