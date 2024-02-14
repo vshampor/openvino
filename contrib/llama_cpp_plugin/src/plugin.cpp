@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "compiled_model.hpp"
+#include "openvino/op/constant.hpp"
 
 
 namespace {
@@ -25,20 +26,27 @@ namespace ov {
             } else {
                 std::shared_ptr<ov::Node> node_with_tensor = *iter;
                 std::cout << "VSHAMPOR: node type is " << node_with_tensor->get_type_name() << std::endl;
-                ov::descriptor::Tensor& tensor_descr = node_with_tensor->get_output_tensor(0);
-                std::cout << "VSHAMPOR: node output tensor shape is " << tensor_descr.get_shape().to_string() << std::endl;
-                ov::TensorVector in, out;
-                node_with_tensor->evaluate(out, in);
-                std::cout << "VSHAMPOR: evaluated " << out.size() << " output tensors\n";
-                if (!out.empty()) {
-                    const ov::Tensor& tensor = out[0];
-                    const float* vals = tensor.data<float>();
-                    std::cout << "VSHAMPOR: first elements of the weight tensor are ";
-                    for (size_t i = 0; i < 10; i++) {
-                        std::cout << vals[i] << " ";
-                    }
-                    std::cout << std::endl;
+                std::shared_ptr<ov::op::v0::Constant> const_node_ptr = ov::as_type_ptr<ov::op::v0::Constant>(node_with_tensor);
+                const float* data_ptr = const_node_ptr->get_data_ptr<element::Type_t::f32>();
+                // ov::descriptor::Tensor& tensor_descr = node_with_tensor->get_output_tensor(0);
+                // std::cout << "VSHAMPOR: node output tensor shape is " << tensor_descr.get_shape().to_string() << std::endl;
+                // ov::TensorVector in, out;
+                // node_with_tensor->evaluate(out, in);
+                // std::cout << "VSHAMPOR: evaluated " << out.size() << " output tensors\n";
+                // if (!out.empty()) {
+                //     const ov::Tensor& tensor = out[0];
+                //     const float* vals = tensor.data<float>();
+                //     std::cout << "VSHAMPOR: first elements of the weight tensor are ";
+                //     for (size_t i = 0; i < 10; i++) {
+                //         std::cout << vals[i] << " ";
+                //     }
+                //     std::cout << std::endl;
+                // }
+                std::cout << "VSHAMPOR: first elements of the weight tensor are ";
+                for (size_t i = 0; i < 10; i++) {
+                    std::cout << data_ptr[i] << " ";
                 }
+                std::cout << std::endl;
             }
             return compile_model(model, properties, {});
         }

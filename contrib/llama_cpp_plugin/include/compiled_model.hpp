@@ -2,6 +2,7 @@
 #define LLAMA_CPP_COMPILED_MODEL_HPP
 
 #include "openvino/runtime/icompiled_model.hpp"
+#include "llama.h"
 
 namespace ov {
     namespace llama_cpp_plugin {
@@ -51,6 +52,9 @@ namespace ov {
              * @return Sync infer request
              */
             virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
+
+        private:
+            llama_model* llama_model_ptr;
         };
     }
 }  // namespace ov
