@@ -63,17 +63,58 @@ namespace ov {
 
             auto rt_info = model->get_rt_info();
             OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
+            OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_name_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_shape_map") != 0);
 
             RTMap& tensor_name_map = model->get_rt_info<RTMap&>("gguf_tensor_name_map");
             RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("gguf_tensor_shape_map");
             RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
+            RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
 
-            size_t gguf_version = kv_params["gguf_version"].as<size_t>();
+            size_t gguf_version = model->get_rt_info<size_t>("gguf_version");
             std::cout << "VSHAMPOR: parsed gguf_version " << gguf_version << std::endl;
 
+            // kv params
+            OPENVINO_ASSERT(kv_params.size() == kv_types.size());
+            size_t n_kv = kv_params.size();
+            std::vector<gguf_kv> kv_vector;
+            std::vector<std::string> kv_string_data;
+            for (const auto& kv_pair: kv_params) {
+                gguf_kv kv;
 
+                const auto& key = kv_pair.first;
+                kv.key.n = key.length();
+                kv.key.data = (char*) key.c_str(); // TODO (vshampor) see equivalent case below
+
+                uint32_t value_type = kv_types[key].as<uint32_t>();
+                gguf_type gguf_value_type = (gguf_type) value_type;
+                kv.type = gguf_value_type;
+                switch (gguf_value_type) {
+                    case GGUF_TYPE_UINT8:   kv.value.uint8    = kv_pair.second.as<uint8_t>();  break;
+                    case GGUF_TYPE_INT8:    kv.value.int8     = kv_pair.second.as<int8_t>(); ; break;
+                    case GGUF_TYPE_UINT16:  kv.value.uint16   = kv_pair.second.as<uint16_t>(); break;
+                    case GGUF_TYPE_INT16:   kv.value.int16    = kv_pair.second.as<int16_t>();  break;
+                    case GGUF_TYPE_UINT32:  kv.value.uint32   = kv_pair.second.as<uint32_t>(); break;
+                    case GGUF_TYPE_INT32:   kv.value.int32    = kv_pair.second.as<int32_t>();  break;
+                    case GGUF_TYPE_FLOAT32: kv.value.float32  = kv_pair.second.as<float>();    break;
+                    case GGUF_TYPE_UINT64:  kv.value.uint64   = kv_pair.second.as<uint64_t>(); break;
+                    case GGUF_TYPE_INT64:   kv.value.int64    = kv_pair.second.as<int64_t>();  break;
+                    case GGUF_TYPE_FLOAT64: kv.value.float64  = kv_pair.second.as<double>();   break;
+                    case GGUF_TYPE_BOOL:    kv.value.bool_    = kv_pair.second.as<bool>();     break;
+                    case GGUF_TYPE_STRING:
+                        kv_string_data.push_back(kv_pair.second.as<std::string>());
+                        kv.value.str.data = (char*) kv_string_data.back().c_str(); break; // TODO (vshampor) see equivalent case below
+                    case GGUF_TYPE_ARRAY:
+                        {
+                            OPENVINO_THROW("Array gguf kv params not supported yet");
+                        } break;
+                    default: OPENVINO_THROW("Invalid type of a GGUF kv-value");
+                }
+                kv_vector.push_back(kv);
+            }
+
+            // tensors
             OPENVINO_ASSERT(tensor_name_map.size() == tensor_shape_map.size());
             size_t n_tensors = tensor_name_map.size();
             std::cout << "VSHAMPOR: got " << n_tensors << " tensors from rt_info\n";
@@ -123,10 +164,22 @@ namespace ov {
 
             std::cout << "VSHAMPOR: found " << num_found_tensors << "/" << n_tensors << " tensors" << std::endl;
 
-            llama_model_ptr = llama_load_model_from_data(n_tensors, tensor_infos.data(), 0 /* n_kv */, nullptr /* kv_data */, tensor_data_ptrs.data(),  params);
+            // m_llama_model_ptr = llama_load_model_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(),  params);
+            //
+            gguf_init_params gguf_params;
+            gguf_params.no_alloc = false;
+            gguf_params.ctx = nullptr;
+
+            m_gguf_ctx = gguf_init_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(), gguf_params);
+
+            std::string fname = "/tmp/exported.gguf";
+            std::cout << "VSHAMPOR: attempting export via gguf_write_to_file " << std::endl;
+            std::cout << "VSHAMPOR: filename is  " << fname << std::endl;
+            gguf_write_to_file(m_gguf_ctx, fname.c_str(), /* only_meta = */ false);
+
         }
 
-        void LlamaCppModel::export_model(std::ostream& model) const {
+        void LlamaCppModel::export_model(std::ostream& output_stream) const {
             OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
         }
 

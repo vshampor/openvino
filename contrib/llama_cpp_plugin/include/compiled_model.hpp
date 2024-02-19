@@ -54,7 +54,8 @@ namespace ov {
             virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
 
         private:
-            llama_model* llama_model_ptr;
+            llama_model* m_llama_model_ptr = nullptr;
+            gguf_context* m_gguf_ctx = nullptr;
         };
     }
 }  // namespace ov
