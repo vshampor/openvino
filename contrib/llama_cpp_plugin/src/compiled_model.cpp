@@ -221,6 +221,7 @@ namespace ov {
 
             TensorWeightMatcher matcher{model, parsed_weights_to_search_for};
             std::unordered_map<std::string, std::shared_ptr<ov::op::v0::Constant>> matches = matcher.get_matches();
+
             std::list<std::string> llama_name_storage;
 
             size_t n_tensors = 0;
@@ -277,6 +278,7 @@ namespace ov {
             std::cout << "VSHAMPOR: attempting export via gguf_write_to_file " << std::endl;
             std::cout << "VSHAMPOR: filename is  " << fname << std::endl;
             gguf_write_to_file(m_gguf_ctx, fname.c_str(), /* only_meta = */ false);
+            std::cout << "VSHAMPOR: write finished." << fname << std::endl;
 
         }
 
