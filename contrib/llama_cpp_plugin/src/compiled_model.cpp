@@ -1,8 +1,95 @@
 #include "compiled_model.hpp"
 #include "infer_request.hpp"
+#include <openvino/op/constant.hpp>
 
 namespace ov {
     namespace llama_cpp_plugin {
+        class TensorWeightMatcher {
+        public:
+            // TODO (vshampor) implement this for faster weight node matching.
+            // Use std::list, two passes - first for full name match, second for prefix-match; remove entries from list on match
+            using RTInfoTensorName = std::string;
+            using OvNodeName = std::string;
+            using LlamaTensorName = std::string;
+
+            TensorWeightMatcher(const std::shared_ptr<ov::Model>& model, std::map<RTInfoTensorName, ov::Shape> tensor_names_with_shapes_to_match) {
+                std::multimap<RTInfoTensorName, std::shared_ptr<ov::op::v0::Constant>> intermediate_matches_map;
+
+                const auto node_vector = model->get_ops();
+                std::list<std::shared_ptr<ov::op::v0::Constant>> const_nodes_in_model;
+                for (const auto& node_ptr : node_vector) {
+                    if (ov::is_type<ov::op::v0::Constant>(node_ptr)) const_nodes_in_model.push_back(ov::as_type_ptr<ov::op::v0::Constant>(node_ptr));
+                }
+
+                // full substring match pass
+                std::map<RTInfoTensorName, ov::Shape> unmatched_rt_info_names_on_first_pass = extract_matches(intermediate_matches_map, tensor_names_with_shapes_to_match, const_nodes_in_model,
+                        [](const std::string& substring, const std::string& source) { return source.find(substring) != std::string::npos; });
+
+                // prefix substring match pass
+                std::map<RTInfoTensorName, ov::Shape> unmatched_rt_info_names_on_second_pass = extract_matches(intermediate_matches_map, unmatched_rt_info_names_on_first_pass, const_nodes_in_model,
+                        [](const std::string& substring, const std::string& source) {
+                        return source.find(get_weight_name_without_torch_postfix(substring)) != std::string::npos; });
+
+                for (auto it = intermediate_matches_map.begin(); it != intermediate_matches_map.end(); it = intermediate_matches_map.upper_bound(it->first)) {
+                    // TODO: perf improvement by iterating with ++;
+                    RTInfoTensorName rt_info_name = it->first;
+                    if (intermediate_matches_map.count(rt_info_name) != 1) {
+                        std::cout << "VSHAMPOR: multiple matches for weight name " << rt_info_name << " and shape " << it->second->get_shape().to_string() << ", found ";
+                        auto range_it_pair = intermediate_matches_map.equal_range(rt_info_name);
+                        for (auto multimatch_it = range_it_pair.first; multimatch_it != range_it_pair.second; multimatch_it++) {
+                            auto node_ptr = multimatch_it->second;
+                            std::cout << node_ptr->get_friendly_name() << "(shape " << node_ptr->get_shape().to_string() << "),";
+                        }
+                        std::cout << "will take the first match" << std::endl;
+                    }
+                    const auto& match = intermediate_matches_map.find(rt_info_name)->second;
+                    m_rtinfo_name_to_weight_node_map[rt_info_name] = match;
+                }
+                std::cout << "VSHAMPOR: did not find the weight node for " << unmatched_rt_info_names_on_second_pass.size() << " weights:" << std::endl;
+                for (const auto& unmatched_entry: unmatched_rt_info_names_on_second_pass) {
+                    std::cout << '\t' << unmatched_entry.first << std::endl;
+                }
+            }
+
+        std::unordered_map<RTInfoTensorName, std::shared_ptr<ov::op::v0::Constant>> get_matches() { return m_rtinfo_name_to_weight_node_map; }
+
+        private:
+            std::map<RTInfoTensorName, ov::Shape> extract_matches(std::multimap<RTInfoTensorName, std::shared_ptr<ov::op::v0::Constant>>& output_matches_map,
+                                                                  const std::map<RTInfoTensorName, ov::Shape>& names_with_shapes_to_match,
+                                                                  const std::list<std::shared_ptr<ov::op::v0::Constant>>& search_list,
+                                                                  std::function<bool(const std::string& substring, const std::string& source)> name_match_predicate) {
+                std::map<RTInfoTensorName, ov::Shape> unmatched_rt_info_names;
+                for (const auto& pair: names_with_shapes_to_match) {
+                    RTInfoTensorName rt_info_name = pair.first;
+                    const ov::Shape& wanted_shape = pair.second;
+                    bool matched = false;
+                    for (auto it = search_list.begin(); it != search_list.end(); it++) {
+                        auto node_ptr = *it;
+                        const std::string& friendly_name = node_ptr->get_friendly_name();
+                        if (name_match_predicate(rt_info_name, friendly_name) &&
+                            node_ptr->get_shape() == wanted_shape) {
+                            output_matches_map.insert(std::make_pair(rt_info_name, node_ptr));
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) unmatched_rt_info_names.insert(pair);
+                }
+                return unmatched_rt_info_names;
+            }
+
+            static std::string get_weight_name_without_torch_postfix(std::string torch_weight_name) {
+                size_t idx = torch_weight_name.rfind(".");
+                if (idx == std::string::npos) return torch_weight_name;
+                return std::string(torch_weight_name, 0, idx);
+            }
+
+            size_t num_exact_matches = 0;
+            size_t num_partial_matches = 0;
+            std::unordered_map<RTInfoTensorName, std::shared_ptr<ov::op::v0::Constant>> m_rtinfo_name_to_weight_node_map;
+        };
+
+
         std::vector<std::shared_ptr<ov::Node>> get_nodes_containing_name_with_shape(const std::shared_ptr<ov::Model>& model, const std::string& weight_name, const ov::Shape& shape) {
             auto ops = model->get_ops();
             std::vector<std::shared_ptr<ov::Node>> found_weight_nodes;
@@ -116,32 +203,31 @@ namespace ov {
 
             // tensors
             OPENVINO_ASSERT(tensor_name_map.size() == tensor_shape_map.size());
-            size_t n_tensors = tensor_name_map.size();
-            std::cout << "VSHAMPOR: got " << n_tensors << " tensors from rt_info\n";
+            size_t n_tensors_in_rtinfo = tensor_name_map.size();
+            std::cout << "VSHAMPOR: got " << n_tensors_in_rtinfo << " tensors from rt_info\n";
 
             std::vector<struct gguf_tensor_info> tensor_infos;
             std::vector<void*> tensor_data_ptrs;
 
             auto tn_map_iter = tensor_name_map.begin();
             size_t num_found_tensors = 0;
-            for (size_t i = 0; i < n_tensors; i++) {
-                const std::string& ov_name = tn_map_iter->first;
-                const std::string& llama_name = tn_map_iter->second.as<std::string>();
-                ov::Shape expected_shape = tensor_shape_map[ov_name].as<std::string>();
+            std::map<std::string, ov::Shape> parsed_weights_to_search_for;
+            for (const auto& rtinfo_name_and_llama_name : tensor_name_map) {
+                const std::string& rtinfo_name = rtinfo_name_and_llama_name.first;
+                const std::string& llama_name = rtinfo_name_and_llama_name.second.as<std::string>();
+                ov::Shape expected_shape = tensor_shape_map[rtinfo_name].as<std::string>();
+                parsed_weights_to_search_for[rtinfo_name] = expected_shape;
+            }
 
-                std::string search_name(ov_name);
-                if (!has_weight_matches(model, search_name, expected_shape)) {
-                    if (!has_partial_weight_matches(model, search_name, expected_shape)) {
-                        std::cout << "VSHAMPOR: did not find the weight node for weight name " << ov_name << std::endl;
-                        tn_map_iter++;
-                        continue;
-                    }
-                    std::cout << "VSHAMPOR: found partial match for torch name " << ov_name << std::endl;
-                    search_name = get_weight_name_without_torch_postfix(search_name);
-                }
+            TensorWeightMatcher matcher{model, parsed_weights_to_search_for};
+            std::unordered_map<std::string, std::shared_ptr<ov::op::v0::Constant>> matches = matcher.get_matches();
 
-                num_found_tensors++;
-                auto weight_const_node_ptr = get_weight_by_name_and_shape(model, search_name, expected_shape);
+            size_t n_tensors = 0;
+
+            for (const auto& matched_weight_pair : matches) {
+                std::string rt_info_name = matched_weight_pair.first;
+                std::string llama_name = tensor_name_map[rt_info_name].as<std::string>();
+                auto weight_const_node_ptr = matched_weight_pair.second;
                 auto weight_shape = weight_const_node_ptr->get_shape();
 
                 gguf_tensor_info info;
@@ -158,11 +244,10 @@ namespace ov {
 
                 tensor_infos.push_back(info);
                 tensor_data_ptrs.push_back((void*)(weight_const_node_ptr->get_data_ptr())); // TODO (vshampor): danger - casts `const` away
-
-                tn_map_iter++;
+                n_tensors++;
             }
 
-            std::cout << "VSHAMPOR: found " << num_found_tensors << "/" << n_tensors << " tensors" << std::endl;
+            std::cout << "VSHAMPOR: found " << matches.size() << "/" << parsed_weights_to_search_for.size() << " tensors" << std::endl;
 
             // m_llama_model_ptr = llama_load_model_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(),  params);
             //
