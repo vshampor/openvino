@@ -221,29 +221,45 @@ namespace ov {
 
             TensorWeightMatcher matcher{model, parsed_weights_to_search_for};
             std::unordered_map<std::string, std::shared_ptr<ov::op::v0::Constant>> matches = matcher.get_matches();
+            std::list<std::string> llama_name_storage;
 
             size_t n_tensors = 0;
 
+            size_t offset = 0; // each tensor_info has to have a correct offset including padding, checked for in gguf_write_to_buf
             for (const auto& matched_weight_pair : matches) {
                 std::string rt_info_name = matched_weight_pair.first;
-                std::string llama_name = tensor_name_map[rt_info_name].as<std::string>();
+
+                // Need to store the names in the list so that the passed c_str() pointers in tensor_infos to the llama names stay valid
+                // until they get deepcopied in gguf/llama functions
+                llama_name_storage.push_back(tensor_name_map[rt_info_name].as<std::string>());
+                const std::string& llama_name = llama_name_storage.back();
+
                 auto weight_const_node_ptr = matched_weight_pair.second;
                 auto weight_shape = weight_const_node_ptr->get_shape();
 
                 gguf_tensor_info info;
 
+                info.type = GGML_TYPE_F32; // TODO (vshampor): better type assignment based on actual element type of the Constant node
+
                 info.name.n = llama_name.length();
                 info.name.data = (char*) llama_name.c_str();  // TODO (vshampor): either do this via const_cast, or will have to implement own structures for
                                                               // read-only data passing to llama_load_model_from_data
                 info.n_dims = weight_shape.size();
-                std::fill(std::begin(info.ne), std::begin(info.ne) + sizeof(info.ne), 0);
+                std::fill(std::begin(info.ne), std::begin(info.ne) + sizeof(info.ne), 1);
                 std::copy(weight_shape.begin(), weight_shape.end(), info.ne);
 
-                info.offset = 0;
-                info.data = nullptr;
+                void* data_ptr = (void*)(weight_const_node_ptr->get_data_ptr()); // TODO (vshampor): danger - casts `const` away
+
+                info.size = weight_const_node_ptr->get_byte_size();
+                info.offset = offset;
+
+                const size_t size_pad = GGML_PAD(info.size, GGUF_DEFAULT_ALIGNMENT);
+                offset += size_pad;
+
+                info.data = data_ptr;
 
                 tensor_infos.push_back(info);
-                tensor_data_ptrs.push_back((void*)(weight_const_node_ptr->get_data_ptr())); // TODO (vshampor): danger - casts `const` away
+                tensor_data_ptrs.push_back(data_ptr);
                 n_tensors++;
             }
 
