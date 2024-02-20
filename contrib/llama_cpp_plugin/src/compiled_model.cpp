@@ -166,13 +166,16 @@ namespace ov {
             OPENVINO_ASSERT(kv_params.size() == kv_types.size());
             size_t n_kv = kv_params.size();
             std::vector<gguf_kv> kv_vector;
-            std::vector<std::string> kv_string_data;
+
+            std::list<std::string> kv_key_string_storage;
+            std::list<std::string> kv_value_string_storage;
             for (const auto& kv_pair: kv_params) {
                 gguf_kv kv;
 
                 const auto& key = kv_pair.first;
                 kv.key.n = key.length();
-                kv.key.data = (char*) key.c_str(); // TODO (vshampor) see equivalent case below
+                kv_key_string_storage.push_back(key);
+                kv.key.data = (char*) kv_key_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
 
                 uint32_t value_type = kv_types[key].as<uint32_t>();
                 gguf_type gguf_value_type = (gguf_type) value_type;
@@ -189,9 +192,13 @@ namespace ov {
                     case GGUF_TYPE_INT64:   kv.value.int64    = kv_pair.second.as<int64_t>();  break;
                     case GGUF_TYPE_FLOAT64: kv.value.float64  = kv_pair.second.as<double>();   break;
                     case GGUF_TYPE_BOOL:    kv.value.bool_    = kv_pair.second.as<bool>();     break;
-                    case GGUF_TYPE_STRING:
-                        kv_string_data.push_back(kv_pair.second.as<std::string>());
-                        kv.value.str.data = (char*) kv_string_data.back().c_str(); break; // TODO (vshampor) see equivalent case below
+                    case GGUF_TYPE_STRING: {
+                        std::string string_value = kv_pair.second.as<std::string>();
+                        kv_value_string_storage.push_back(string_value);
+                        kv.value.str.n = string_value.length();
+                        kv.value.str.data = (char*) kv_value_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
+                        break;
+                    }
                     case GGUF_TYPE_ARRAY:
                         {
                             OPENVINO_THROW("Array gguf kv params not supported yet");
@@ -247,7 +254,10 @@ namespace ov {
                                                               // read-only data passing to llama_load_model_from_data
                 info.n_dims = weight_shape.size();
                 std::fill(std::begin(info.ne), std::begin(info.ne) + sizeof(info.ne), 1);
-                std::copy(weight_shape.begin(), weight_shape.end(), info.ne);
+
+                // looks like GGUF expects inverse order of dimensions when compared to e.g. torch, see gguf.gguf_writer.GGUFWriter.add_tensor_info
+                // in gguf python package
+                std::copy(weight_shape.rbegin(), weight_shape.rend(), info.ne);
 
                 void* data_ptr = (void*)(weight_const_node_ptr->get_data_ptr()); // TODO (vshampor): danger - casts `const` away
 
