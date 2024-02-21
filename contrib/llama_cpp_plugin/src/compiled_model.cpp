@@ -1,6 +1,7 @@
 #include "compiled_model.hpp"
 #include "infer_request.hpp"
 #include <openvino/op/constant.hpp>
+#include <fstream>
 
 namespace ov {
     namespace llama_cpp_plugin {
@@ -141,6 +142,64 @@ namespace ov {
             return const_node_ptr;
         }
 
+        using TransposePermutation = std::pair<size_t, size_t>;
+
+        void append_tensor_data_with_transpositions(const std::string& fname, const std::vector<gguf_tensor_info>& tensor_infos, const std::vector<void*>& tensor_data_ptrs,
+                const std::map<std::string, TransposePermutation>& transpositions) {
+             // assuming contiguous data underneath each pointer from tensor_data_ptrs
+             OPENVINO_ASSERT(tensor_infos.size() == tensor_data_ptrs.size());
+             std::ofstream out(fname, std::ios::app | std::ios::out);
+             for (size_t i = 0; i < tensor_infos.size(); i++) {
+                const auto& tensor_info = tensor_infos[i];
+                OPENVINO_ASSERT(tensor_info.type == GGML_TYPE_F32); // TODO (vshampor): writing transposed tensor data for other data types, especially lower-bitwidth; maybe use OV inference for that
+
+                const char* tensor_data = reinterpret_cast<char*>(tensor_data_ptrs[i]);
+
+                auto it = transpositions.find(std::string(tensor_info.name.data));
+                if (it == transpositions.end()) {
+                    // original IR tensor should not be transposed to conform to GGUF expectations, can write as-is
+                    out.write(tensor_data, tensor_info.size);
+                    continue;
+                }
+
+                if (it != transpositions.end()) {
+                    std::vector<size_t> original_strides(GGML_MAX_DIMS, 1);
+                    TransposePermutation permutation = it->second;
+
+                    for (size_t dim_idx = 1; dim_idx < GGML_MAX_DIMS; dim_idx++) {
+                        original_strides[dim_idx] = tensor_info.ne[dim_idx] * original_strides[dim_idx - 1];
+                    }
+
+                    std::vector<size_t> permuted_strides(original_strides);
+                    std::swap(permuted_strides[permutation.first], permuted_strides[permutation.second]);
+
+                    std::cout << "VSHAMPOR: writing tensor with size " << tensor_info.size;
+                    std::cout << " shape ";
+                    for (auto dim : tensor_info.ne) std::cout << dim << ",";
+                    std::cout << " original stride ";
+                    for (auto stride : original_strides) std::cout << stride << ",";
+                    std::cout << " permuted stride ";
+                    for (auto stride : permuted_strides) std::cout << stride << ",";
+                    std::cout << std::endl;
+
+                    // TODO (vshampor): rewrite the loop below using recurrent templates?
+                    // This relies on GGUF_MAX_DIMS == 4 and unused dims being equal to 1
+                    size_t current_offset = 0;
+                    size_t element_size = sizeof(float);
+                    size_t num_bytes_written = 0;
+                    for (size_t dim_0 = 0; dim_0 < tensor_info.ne[0]; dim_0++)
+                        for (size_t dim_1 = 0; dim_1 < tensor_info.ne[1]; dim_1++)
+                            for (size_t dim_2 = 0; dim_2 < tensor_info.ne[2]; dim_2++)
+                                for (size_t dim_3 = 0; dim_3 < tensor_info.ne[3]; dim_3++) {
+                                    current_offset = element_size * (dim_0 * permuted_strides[0] + dim_1 * permuted_strides[1] + dim_2 * permuted_strides[2] + dim_3 * permuted_strides[3]);
+                                    out.write(tensor_data + current_offset, element_size);
+                                    num_bytes_written += element_size;
+                                }
+                    std::cout << "VSHAMPOR: wrote " << num_bytes_written << std::endl;
+                    OPENVINO_ASSERT(num_bytes_written == tensor_info.size);
+                }
+             }
+        }
         LlamaCppModel::LlamaCppModel(const std::shared_ptr<ov::Model>& model,
                       const std::shared_ptr<const ov::IPlugin>& plugin,
                       const ov::SoPtr<ov::IRemoteContext>& context,
@@ -152,12 +211,14 @@ namespace ov {
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_name_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_shape_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_expected_tensor_shapes") != 0);
+            OPENVINO_ASSERT(rt_info.count("gguf_transpose_permutations") != 0);
 
+            RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
+            RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
             RTMap& tensor_name_map = model->get_rt_info<RTMap&>("gguf_tensor_name_map");
             RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("gguf_tensor_shape_map");
             RTMap& expected_tensor_shapes_map = model->get_rt_info<RTMap&>("gguf_expected_tensor_shapes");
-            RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
-            RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
+            RTMap& transpose_permutations_rtmap = model->get_rt_info<RTMap&>("gguf_transpose_permutations");
 
             size_t gguf_version = model->get_rt_info<size_t>("gguf_version");
             std::cout << "VSHAMPOR: parsed gguf_version " << gguf_version << std::endl;
@@ -249,6 +310,7 @@ namespace ov {
                 auto weight_const_node_ptr = matched_weight_pair.second;
                 auto weight_shape = weight_const_node_ptr->get_shape();
                 auto expected_weight_shape = ov::Shape(expected_tensor_shapes_map[llama_name].as<std::string>());
+                OPENVINO_ASSERT(expected_weight_shape.size() < GGML_MAX_DIMS);
 
                 gguf_tensor_info info;
 
@@ -266,6 +328,11 @@ namespace ov {
                 std::copy(expected_weight_shape.rbegin(), expected_weight_shape.rend(), info.ne); // TODO: actually transpose written tensors
 
                 void* data_ptr = (void*)(weight_const_node_ptr->get_data_ptr()); // TODO (vshampor): danger - casts `const` away
+                                                                                 // also - the expected_weight_shape is in general different from actual ov::Tensor shape,
+                                                                                 // in particular it may be transposed, so we actually need to set the pointers to shape-corrected
+                                                                                 // tensor storage, which we don't do here - we are only preparing this data to get a convenient
+                                                                                 // gguf_context object to reuse metadata (header) writing code, tensor data transpositions will be done during
+                                                                                 // actual file write
 
                 info.size = weight_const_node_ptr->get_byte_size();
                 info.offset = offset;
@@ -291,9 +358,25 @@ namespace ov {
             m_gguf_ctx = gguf_init_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(), gguf_params);
 
             std::string fname = "/tmp/exported.gguf";
-            std::cout << "VSHAMPOR: attempting export via gguf_write_to_file " << std::endl;
-            std::cout << "VSHAMPOR: filename is  " << fname << std::endl;
-            gguf_write_to_file(m_gguf_ctx, fname.c_str(), /* only_meta = */ false);
+            std::cout << "VSHAMPOR: output filename is  " << fname << std::endl;
+            std::cout << "VSHAMPOR: writing metadata (GGUF header) " << std::endl;
+            gguf_write_to_file(m_gguf_ctx, fname.c_str(), /* only_meta = */ true);
+
+            std::map<std::string, TransposePermutation> transpose_permutations;
+
+            for (const auto& llama_name_and_permutation : transpose_permutations_rtmap) {
+                std::string permutation_str = llama_name_and_permutation.second.as<std::string>();
+                std::stringstream ss(permutation_str);
+                TransposePermutation permutation;
+                bool is_ok = true;
+                is_ok &= static_cast<bool>(ss >> permutation.first);
+                is_ok &= static_cast<bool>(ss >> permutation.second);
+                OPENVINO_ASSERT(is_ok, "failed to read permutation");
+                transpose_permutations[llama_name_and_permutation.first] = permutation;
+            }
+
+            std::cout << "VSHAMPOR: writing tensor data (blob with transpositions) " << std::endl;
+            append_tensor_data_with_transpositions(fname, tensor_infos, tensor_data_ptrs, transpose_permutations);
             std::cout << "VSHAMPOR: write finished." << fname << std::endl;
 
         }
