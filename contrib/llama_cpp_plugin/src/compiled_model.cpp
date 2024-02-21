@@ -45,7 +45,9 @@ namespace ov {
                     const auto& match = intermediate_matches_map.find(rt_info_name)->second;
                     m_rtinfo_name_to_weight_node_map[rt_info_name] = match;
                 }
-                std::cout << "VSHAMPOR: did not find the weight node for " << unmatched_rt_info_names_on_second_pass.size() << " weights:" << std::endl;
+                if (!unmatched_rt_info_names_on_second_pass.empty()) {
+                    std::cout << "VSHAMPOR: did not find the weight node for " << unmatched_rt_info_names_on_second_pass.size() << " weights:" << std::endl;
+                }
                 for (const auto& unmatched_entry: unmatched_rt_info_names_on_second_pass) {
                     std::cout << '\t' << unmatched_entry.first << std::endl;
                 }
@@ -153,9 +155,11 @@ namespace ov {
             OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_name_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_shape_map") != 0);
+            OPENVINO_ASSERT(rt_info.count("gguf_expected_tensor_shapes") != 0);
 
             RTMap& tensor_name_map = model->get_rt_info<RTMap&>("gguf_tensor_name_map");
             RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("gguf_tensor_shape_map");
+            RTMap& expected_tensor_shapes_map = model->get_rt_info<RTMap&>("gguf_expected_tensor_shapes");
             RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
             RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
 
@@ -211,7 +215,7 @@ namespace ov {
             // tensors
             OPENVINO_ASSERT(tensor_name_map.size() == tensor_shape_map.size());
             size_t n_tensors_in_rtinfo = tensor_name_map.size();
-            std::cout << "VSHAMPOR: got " << n_tensors_in_rtinfo << " tensors from rt_info\n";
+            std::cout << "VSHAMPOR: got request for " << n_tensors_in_rtinfo << " tensors from rt_info\n";
 
             std::vector<struct gguf_tensor_info> tensor_infos;
             std::vector<void*> tensor_data_ptrs;
@@ -219,31 +223,38 @@ namespace ov {
             auto tn_map_iter = tensor_name_map.begin();
             size_t num_found_tensors = 0;
             std::map<std::string, ov::Shape> parsed_weights_to_search_for;
-            for (const auto& rtinfo_name_and_llama_name : tensor_name_map) {
-                const std::string& rtinfo_name = rtinfo_name_and_llama_name.first;
-                const std::string& llama_name = rtinfo_name_and_llama_name.second.as<std::string>();
-                ov::Shape expected_shape = tensor_shape_map[rtinfo_name].as<std::string>();
+            for (const auto& llama_name_and_rtinfo_name : tensor_name_map) {
+                const std::string& llama_name = llama_name_and_rtinfo_name.first;
+                const std::string& rtinfo_name = llama_name_and_rtinfo_name.second.as<std::string>();
+                ov::Shape expected_shape = tensor_shape_map[llama_name].as<std::string>();
                 parsed_weights_to_search_for[rtinfo_name] = expected_shape;
             }
 
             TensorWeightMatcher matcher{model, parsed_weights_to_search_for};
             std::unordered_map<std::string, std::shared_ptr<ov::op::v0::Constant>> matches = matcher.get_matches();
+            std::unordered_map<std::string, std::shared_ptr<ov::op::v0::Constant>> llama_name_to_constant_node_map;
+            for (const auto& entry : tensor_name_map) {
+                const auto& llama_name = entry.first;
+                const auto& rtinfo_name = entry.second.as<std::string>();
+                llama_name_to_constant_node_map[llama_name] = matches[rtinfo_name];
+            }
+            std::cout << "VSHAMPOR: requested tensors map to " << llama_name_to_constant_node_map.size() << " tensors to search in model (shared tensors considered)\n";
+
 
             std::list<std::string> llama_name_storage;
 
             size_t n_tensors = 0;
 
             size_t offset = 0; // each tensor_info has to have a correct offset including padding, checked for in gguf_write_to_buf
-            for (const auto& matched_weight_pair : matches) {
-                std::string rt_info_name = matched_weight_pair.first;
-
+            for (const auto& matched_weight_pair : llama_name_to_constant_node_map) {
                 // Need to store the names in the list so that the passed c_str() pointers in tensor_infos to the llama names stay valid
                 // until they get deepcopied in gguf/llama functions
-                llama_name_storage.push_back(tensor_name_map[rt_info_name].as<std::string>());
+                llama_name_storage.push_back(matched_weight_pair.first);
                 const std::string& llama_name = llama_name_storage.back();
 
                 auto weight_const_node_ptr = matched_weight_pair.second;
                 auto weight_shape = weight_const_node_ptr->get_shape();
+                auto expected_weight_shape = ov::Shape(expected_tensor_shapes_map[llama_name].as<std::string>());
 
                 gguf_tensor_info info;
 
@@ -257,7 +268,8 @@ namespace ov {
 
                 // looks like GGUF expects inverse order of dimensions when compared to e.g. torch, see gguf.gguf_writer.GGUFWriter.add_tensor_info
                 // in gguf python package
-                std::copy(weight_shape.rbegin(), weight_shape.rend(), info.ne);
+                // std::copy(weight_shape.rbegin(), weight_shape.rend(), info.ne);
+                std::copy(expected_weight_shape.rbegin(), expected_weight_shape.rend(), info.ne); // TODO: actually transpose written tensors
 
                 void* data_ptr = (void*)(weight_const_node_ptr->get_data_ptr()); // TODO (vshampor): danger - casts `const` away
 
