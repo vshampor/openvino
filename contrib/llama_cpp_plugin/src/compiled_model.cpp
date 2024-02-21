@@ -146,10 +146,6 @@ namespace ov {
                       const ov::SoPtr<ov::IRemoteContext>& context,
                       const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
                       ) : ICompiledModel(model, plugin, context, task_executor) {
-            llama_model_params params = llama_model_default_params();
-            params.use_mmap = false;
-            params.vocab_only = false;
-
             auto rt_info = model->get_rt_info();
             OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
@@ -220,8 +216,6 @@ namespace ov {
             std::vector<struct gguf_tensor_info> tensor_infos;
             std::vector<void*> tensor_data_ptrs;
 
-            auto tn_map_iter = tensor_name_map.begin();
-            size_t num_found_tensors = 0;
             std::map<std::string, ov::Shape> parsed_weights_to_search_for;
             for (const auto& llama_name_and_rtinfo_name : tensor_name_map) {
                 const std::string& llama_name = llama_name_and_rtinfo_name.first;
@@ -264,7 +258,7 @@ namespace ov {
                 info.name.data = (char*) llama_name.c_str();  // TODO (vshampor): either do this via const_cast, or will have to implement own structures for
                                                               // read-only data passing to llama_load_model_from_data
                 info.n_dims = weight_shape.size();
-                std::fill(std::begin(info.ne), std::begin(info.ne) + sizeof(info.ne), 1);
+                std::fill(std::begin(info.ne), std::begin(info.ne) + GGML_MAX_DIMS, (uint64_t) 1);
 
                 // looks like GGUF expects inverse order of dimensions when compared to e.g. torch, see gguf.gguf_writer.GGUFWriter.add_tensor_info
                 // in gguf python package
