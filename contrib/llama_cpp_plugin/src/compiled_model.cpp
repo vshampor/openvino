@@ -163,22 +163,43 @@ namespace ov {
                 }
 
                 if (it != transpositions.end()) {
-                    std::vector<size_t> original_strides(GGML_MAX_DIMS, 1);
-                    TransposePermutation permutation = it->second;
+                    std::vector<size_t> layout_shape;
 
-                    for (size_t dim_idx = 1; dim_idx < GGML_MAX_DIMS; dim_idx++) {
-                        original_strides[dim_idx] = tensor_info.ne[dim_idx] * original_strides[dim_idx - 1];
+                    // the shape in .ne is inverted w.r.t original export (~= IR) weight layout
+                    for (size_t dim_idx = 0; dim_idx < tensor_info.n_dims; dim_idx++) {
+                        layout_shape.push_back(tensor_info.ne[GGML_MAX_DIMS - 1 - tensor_info.n_dims - dim_idx]);
+                    }
+
+                    TransposePermutation permutation = it->second;
+                    std::swap(layout_shape[permutation.first], layout_shape[permutation.second]);
+
+                    // expand up to GGML_MAX_DIMS
+                    std::vector<size_t> tmp = layout_shape;
+                    layout_shape.resize(GGML_MAX_DIMS);
+                    for (size_t dim_idx = 0; dim_idx < GGML_MAX_DIMS; dim_idx++) {
+                        if (GGML_MAX_DIMS - dim_idx > tensor_info.n_dims) {
+                            layout_shape[dim_idx] = 1;
+                        }
+                        else { layout_shape[dim_idx] = tmp[dim_idx - tensor_info.n_dims]; }
+                    }
+
+                    std::vector<size_t> original_strides(GGML_MAX_DIMS, 1);
+
+                    for (size_t idx = 0; idx < GGML_MAX_DIMS - 1 ; idx++) {
+                        original_strides[GGML_MAX_DIMS - 2 - idx] = layout_shape[GGML_MAX_DIMS - 1 - idx] * original_strides[GGML_MAX_DIMS - 1 - idx];
                     }
 
                     std::vector<size_t> permuted_strides(original_strides);
                     std::swap(permuted_strides[permutation.first], permuted_strides[permutation.second]);
 
                     std::cout << "VSHAMPOR: writing tensor with size " << tensor_info.size;
-                    std::cout << " shape ";
+                    std::cout << " shape (GGUF) ";
                     for (auto dim : tensor_info.ne) std::cout << dim << ",";
-                    std::cout << " original stride ";
+                    std::cout << " shape (layout) ";
+                    for (auto dim : layout_shape) std::cout << dim << ",";
+                    std::cout << " original stride (layout) ";
                     for (auto stride : original_strides) std::cout << stride << ",";
-                    std::cout << " permuted stride ";
+                    std::cout << " permuted stride (layout)";
                     for (auto stride : permuted_strides) std::cout << stride << ",";
                     std::cout << std::endl;
 
@@ -187,10 +208,10 @@ namespace ov {
                     size_t current_offset = 0;
                     size_t element_size = sizeof(float);
                     size_t num_bytes_written = 0;
-                    for (size_t dim_0 = 0; dim_0 < tensor_info.ne[0]; dim_0++)
-                        for (size_t dim_1 = 0; dim_1 < tensor_info.ne[1]; dim_1++)
-                            for (size_t dim_2 = 0; dim_2 < tensor_info.ne[2]; dim_2++)
-                                for (size_t dim_3 = 0; dim_3 < tensor_info.ne[3]; dim_3++) {
+                    for (size_t dim_0 = 0; dim_0 < layout_shape[0]; dim_0++)
+                        for (size_t dim_1 = 0; dim_1 < layout_shape[1]; dim_1++)
+                            for (size_t dim_2 = 0; dim_2 < layout_shape[2]; dim_2++)
+                                for (size_t dim_3 = 0; dim_3 < layout_shape[3]; dim_3++) {
                                     current_offset = element_size * (dim_0 * permuted_strides[0] + dim_1 * permuted_strides[1] + dim_2 * permuted_strides[2] + dim_3 * permuted_strides[3]);
                                     out.write(tensor_data + current_offset, element_size);
                                     num_bytes_written += element_size;
