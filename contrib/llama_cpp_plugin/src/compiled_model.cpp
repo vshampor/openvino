@@ -144,6 +144,13 @@ namespace ov {
 
         using TransposePermutation = std::pair<size_t, size_t>;
 
+        std::vector<size_t> expand_front(const std::vector<size_t>& vec, size_t val) {
+            OPENVINO_ASSERT(vec.size() < GGML_MAX_DIMS);
+            std::vector<size_t> retval(GGML_MAX_DIMS, val);
+            std::copy(vec.rbegin(), vec.rend(), retval.rbegin());
+            return retval;
+        }
+
         void append_tensor_data_with_transpositions(const std::string& fname, const std::vector<gguf_tensor_info>& tensor_infos, const std::vector<void*>& tensor_data_ptrs,
                 const std::map<std::string, TransposePermutation>& transpositions) {
              // assuming contiguous data underneath each pointer from tensor_data_ptrs
@@ -153,53 +160,55 @@ namespace ov {
                 const auto& tensor_info = tensor_infos[i];
                 OPENVINO_ASSERT(tensor_info.type == GGML_TYPE_F32); // TODO (vshampor): writing transposed tensor data for other data types, especially lower-bitwidth; maybe use OV inference for that
 
-                const char* tensor_data = reinterpret_cast<char*>(tensor_data_ptrs[i]);
+                const char* ir_tensor_data = reinterpret_cast<char*>(tensor_data_ptrs[i]);
 
                 auto it = transpositions.find(std::string(tensor_info.name.data));
                 if (it == transpositions.end()) {
                     // original IR tensor should not be transposed to conform to GGUF expectations, can write as-is
-                    out.write(tensor_data, tensor_info.size);
+                    out.write(ir_tensor_data, tensor_info.size);
                     continue;
                 }
 
                 if (it != transpositions.end()) {
-                    std::vector<size_t> layout_shape;
+                    std::vector<size_t> gguf_layout_shape;
 
                     // the shape in .ne is inverted w.r.t original export (~= IR) weight layout
                     for (size_t dim_idx = 0; dim_idx < tensor_info.n_dims; dim_idx++) {
-                        layout_shape.push_back(tensor_info.ne[GGML_MAX_DIMS - 1 - tensor_info.n_dims - dim_idx]);
+                        gguf_layout_shape.push_back(tensor_info.ne[GGML_MAX_DIMS - 1 - tensor_info.n_dims - dim_idx]);
                     }
 
                     TransposePermutation permutation = it->second;
-                    std::swap(layout_shape[permutation.first], layout_shape[permutation.second]);
+                    std::vector<size_t> ir_layout_shape(gguf_layout_shape);
+                    std::swap(ir_layout_shape[permutation.first], ir_layout_shape[permutation.second]);
 
-                    // expand up to GGML_MAX_DIMS
-                    std::vector<size_t> tmp = layout_shape;
-                    layout_shape.resize(GGML_MAX_DIMS);
-                    for (size_t dim_idx = 0; dim_idx < GGML_MAX_DIMS; dim_idx++) {
-                        if (GGML_MAX_DIMS - dim_idx > tensor_info.n_dims) {
-                            layout_shape[dim_idx] = 1;
-                        }
-                        else { layout_shape[dim_idx] = tmp[dim_idx - tensor_info.n_dims]; }
+                    std::vector<size_t> ir_layout_strides(tensor_info.n_dims, 1);
+
+                    for (size_t idx = 0; idx < tensor_info.n_dims - 1 ; idx++) {
+                        auto previous_stride_it = ir_layout_strides.rbegin() + idx;
+                        auto stride_it = ir_layout_strides.rbegin() + idx + 1;
+                        auto shape_it = ir_layout_shape.rbegin() + idx;
+                        *stride_it = *shape_it * *previous_stride_it;
                     }
 
-                    std::vector<size_t> original_strides(GGML_MAX_DIMS, 1);
 
-                    for (size_t idx = 0; idx < GGML_MAX_DIMS - 1 ; idx++) {
-                        original_strides[GGML_MAX_DIMS - 2 - idx] = layout_shape[GGML_MAX_DIMS - 1 - idx] * original_strides[GGML_MAX_DIMS - 1 - idx];
-                    }
-
-                    std::vector<size_t> permuted_strides(original_strides);
+                    std::vector<size_t> permuted_strides(ir_layout_strides);
                     std::swap(permuted_strides[permutation.first], permuted_strides[permutation.second]);
 
-                    std::cout << "VSHAMPOR: writing tensor with size " << tensor_info.size;
-                    std::cout << " shape (GGUF) ";
-                    for (auto dim : tensor_info.ne) std::cout << dim << ",";
-                    std::cout << " shape (layout) ";
-                    for (auto dim : layout_shape) std::cout << dim << ",";
-                    std::cout << " original stride (layout) ";
-                    for (auto stride : original_strides) std::cout << stride << ",";
-                    std::cout << " permuted stride (layout)";
+                    // expand up to GGML_MAX_DIMS
+                    std::vector<size_t> gguf_layout_shape_ex = expand_front(gguf_layout_shape, 1);
+                    // stride for unused dims will be 0, has no effect on loop because dimension idx for that dim is always 0
+                    permuted_strides = expand_front(permuted_strides, 0);
+
+
+
+                    std::cout << "VSHAMPOR: writing tensor " << tensor_info.name.data << " with size " << tensor_info.size;
+                    std::cout << " shape (GGUF layout) ";
+                    for (auto dim: gguf_layout_shape) std::cout << dim << ",";
+                    std::cout << " shape (IR layout) ";
+                    for (auto dim : ir_layout_shape) std::cout << dim << ",";
+                    std::cout << " stride (IR layout) ";
+                    for (auto stride : ir_layout_strides) std::cout << stride << ",";
+                    std::cout << " stride (IR layout, transposing) ";
                     for (auto stride : permuted_strides) std::cout << stride << ",";
                     std::cout << std::endl;
 
@@ -208,12 +217,12 @@ namespace ov {
                     size_t current_offset = 0;
                     size_t element_size = sizeof(float);
                     size_t num_bytes_written = 0;
-                    for (size_t dim_0 = 0; dim_0 < layout_shape[0]; dim_0++)
-                        for (size_t dim_1 = 0; dim_1 < layout_shape[1]; dim_1++)
-                            for (size_t dim_2 = 0; dim_2 < layout_shape[2]; dim_2++)
-                                for (size_t dim_3 = 0; dim_3 < layout_shape[3]; dim_3++) {
+                    for (size_t dim_0 = 0; dim_0 < gguf_layout_shape_ex[0]; dim_0++)
+                        for (size_t dim_1 = 0; dim_1 < gguf_layout_shape_ex[1]; dim_1++)
+                            for (size_t dim_2 = 0; dim_2 < gguf_layout_shape_ex[2]; dim_2++)
+                                for (size_t dim_3 = 0; dim_3 < gguf_layout_shape_ex[3]; dim_3++) {
                                     current_offset = element_size * (dim_0 * permuted_strides[0] + dim_1 * permuted_strides[1] + dim_2 * permuted_strides[2] + dim_3 * permuted_strides[3]);
-                                    out.write(tensor_data + current_offset, element_size);
+                                    out.write(ir_tensor_data + current_offset, element_size);
                                     num_bytes_written += element_size;
                                 }
                     std::cout << "VSHAMPOR: wrote " << num_bytes_written << std::endl;
@@ -330,6 +339,8 @@ namespace ov {
 
                 auto weight_const_node_ptr = matched_weight_pair.second;
                 auto weight_shape = weight_const_node_ptr->get_shape();
+
+                // does hf-to-gguf invert all tensor dimensions with shapes > 1?
                 auto expected_weight_shape = ov::Shape(expected_tensor_shapes_map[llama_name].as<std::string>());
                 OPENVINO_ASSERT(expected_weight_shape.size() < GGML_MAX_DIMS);
 
@@ -343,10 +354,9 @@ namespace ov {
                 info.n_dims = weight_shape.size();
                 std::fill(std::begin(info.ne), std::begin(info.ne) + GGML_MAX_DIMS, (uint64_t) 1);
 
-                // looks like GGUF expects inverse order of dimensions when compared to e.g. torch, see gguf.gguf_writer.GGUFWriter.add_tensor_info
+                // looks like GGUF expects inverse order of dimensions when compared to e.g. torch and actual row-major layout, see gguf.gguf_writer.GGUFWriter.add_tensor_info
                 // in gguf python package
-                // std::copy(weight_shape.rbegin(), weight_shape.rend(), info.ne);
-                std::copy(expected_weight_shape.rbegin(), expected_weight_shape.rend(), info.ne); // TODO: actually transpose written tensors
+                std::copy(expected_weight_shape.rbegin(), expected_weight_shape.rend(), info.ne);
 
                 void* data_ptr = (void*)(weight_const_node_ptr->get_data_ptr()); // TODO (vshampor): danger - casts `const` away
                                                                                  // also - the expected_weight_shape is in general different from actual ov::Tensor shape,

@@ -84,7 +84,7 @@ int main(int argc, char* argv[]) {
             char right_byte; right_file.read((char*) &right_byte, sizeof(char));
 
             if (left_byte != right_byte) {
-                std::cout << "byte " << bytes_compared << " mismatch (" << (uint32_t) left_byte << " left, " << (uint32_t) right_byte << " right)" << std::endl;
+                std::cout << "byte " << bytes_compared << " mismatch (" << std::hex << +((uint8_t) left_byte) << " left, " << +((uint8_t) right_byte) << " right)" << std::endl;
                 std::cout << "offset left " << std::hex << left_tensor_offset + bytes_compared << ", right " << right_tensor_offset + bytes_compared << std::endl;
                 exit(-1);
             }
