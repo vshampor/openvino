@@ -380,18 +380,16 @@ namespace ov {
 
             std::cout << "VSHAMPOR: found " << matches.size() << "/" << parsed_weights_to_search_for.size() << " tensors" << std::endl;
 
-            // m_llama_model_ptr = llama_load_model_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(),  params);
-            //
             gguf_init_params gguf_params;
             gguf_params.no_alloc = false;
             gguf_params.ctx = nullptr;
 
             m_gguf_ctx = gguf_init_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(), gguf_params);
 
-            std::string fname = "/tmp/exported.gguf";
-            std::cout << "VSHAMPOR: output filename is  " << fname << std::endl;
+            m_converted_gguf_file_name = "/tmp/exported.gguf";
+            std::cout << "VSHAMPOR: output filename is  " << m_converted_gguf_file_name << std::endl;
             std::cout << "VSHAMPOR: writing metadata (GGUF header) " << std::endl;
-            gguf_write_to_file(m_gguf_ctx, fname.c_str(), /* only_meta = */ true);
+            gguf_write_to_file(m_gguf_ctx, m_converted_gguf_file_name.c_str(), /* only_meta = */ true);
 
             std::map<std::string, TransposePermutation> transpose_permutations;
 
@@ -407,13 +405,21 @@ namespace ov {
             }
 
             std::cout << "VSHAMPOR: writing tensor data (blob with transpositions) " << std::endl;
-            append_tensor_data_with_transpositions(fname, tensor_infos, tensor_data_ptrs, transpose_permutations);
-            std::cout << "VSHAMPOR: write finished." << fname << std::endl;
+            append_tensor_data_with_transpositions(m_converted_gguf_file_name, tensor_infos, tensor_data_ptrs, transpose_permutations);
+            std::cout << "VSHAMPOR: write finished." << m_converted_gguf_file_name << std::endl;
 
+            std::cout << "VSHAMPOR: loading llama model from written file..." << std::endl;
+            llama_model_params mparams = llama_model_default_params();
+            m_llama_model_ptr = llama_load_model_from_file(m_converted_gguf_file_name.c_str(), mparams);
+            llama_context_params cparams = llama_context_default_params();
+            m_llama_ctx = llama_new_context_with_model(m_llama_model_ptr, cparams);
+
+            std::cout << "VSHAMPOR: llama model loaded successfully..." << std::endl;
         }
 
         void LlamaCppModel::export_model(std::ostream& output_stream) const {
-            OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+            std::ifstream in(m_converted_gguf_file_name, std::ios::binary);
+            output_stream << in.rdbuf();
         }
 
         std::shared_ptr<const ov::Model> LlamaCppModel::get_runtime_model() const {

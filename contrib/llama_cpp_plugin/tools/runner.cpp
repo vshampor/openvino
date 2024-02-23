@@ -33,6 +33,11 @@ int main(int argc, char* argv[]) {
             ov::Rank r = shape.rank();
             if (r.get_length() == 2) {
                 ov::Tensor input_tensor{curr_input.get_element_type(), ov::Shape({1, 128})};
+                int64_t* data_ptr = input_tensor.data<int64_t>();
+                // fill with something
+                for (size_t elt_idx = 0; elt_idx < input_tensor.get_size(); elt_idx++) {
+                    data_ptr[elt_idx] = 42;
+                }
                 infer_request.set_input_tensor(i, input_tensor);
             }
             else {  // past_key_values
@@ -54,5 +59,14 @@ int main(int argc, char* argv[]) {
     ov::Tensor output = infer_request.get_tensor("logits");
     std::cout << "VSHAMPOR: got output tensor, shape " << output.get_shape().to_string() << std::endl;
 
+    size_t n_output_elts = 10;
+    std::cout << "VSHAMPOR: first " << n_output_elts << " elements are:" << std::endl;
+
+    float* output_data_ptr = output.data<float>();
+    for (size_t elt_idx = 0; elt_idx < n_output_elts; elt_idx++) {
+        std::cout << output_data_ptr[elt_idx] << " ";
+    }
+
+    std::cout << std::endl;
     return 0;
 }

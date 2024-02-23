@@ -6,6 +6,7 @@
 
 namespace ov {
 namespace llama_cpp_plugin {
+
 class LlamaCppSyncInferRequest : public ISyncInferRequest {
 public:
     explicit LlamaCppSyncInferRequest(const std::shared_ptr<const LlamaCppModel>& compiled_model);
@@ -20,6 +21,8 @@ public:
     virtual void infer() override;
     virtual std::vector<ov::ProfilingInfo> get_profiling_info() const override;
     virtual std::vector<ov::SoPtr<ov::IVariableState>> query_state() const override;
+private:
+    std::shared_ptr<const LlamaCppModel> m_compiled_model_ptr;
 };
 
 }  // namespace LlamaCppPlugin

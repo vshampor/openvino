@@ -2,10 +2,12 @@
 #define LLAMA_CPP_COMPILED_MODEL_HPP
 
 #include "openvino/runtime/icompiled_model.hpp"
+#include "openvino/runtime/isync_infer_request.hpp"
 #include "llama.h"
 
 namespace ov {
     namespace llama_cpp_plugin {
+        class LlamaCppSyncInferRequest;
         class LlamaCppModel: public ICompiledModel {
         public:
             LlamaCppModel(const std::shared_ptr<ov::Model>& model,
@@ -54,8 +56,13 @@ namespace ov {
             virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
 
         private:
-            llama_model* m_llama_model_ptr = nullptr;
             gguf_context* m_gguf_ctx = nullptr;
+            std::string m_converted_gguf_file_name;
+
+            llama_model* m_llama_model_ptr = nullptr;
+            llama_context* m_llama_ctx = nullptr;
+
+        friend class ov::llama_cpp_plugin::LlamaCppSyncInferRequest;
         };
     }
 }  // namespace ov
