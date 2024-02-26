@@ -230,6 +230,60 @@ namespace ov {
                 }
              }
         }
+
+        struct ValueStorageForLifetimeExtension {
+            std::list<std::string> kv_key_string_storage;
+            std::list<std::string> kv_value_string_storage;
+            std::list<std::vector<gguf_value>> val_arr_storage;
+            std::list<std::vector<char*>> str_arr_storage;
+        };
+
+        bool maybe_parse_single_element(gguf_type g_type, ov::Any rtmap_value, gguf_value& dst, ValueStorageForLifetimeExtension& store) {
+                switch (g_type) {
+                    case GGUF_TYPE_UINT8:   dst.uint8    = rtmap_value.as<uint8_t>();  break;
+                    case GGUF_TYPE_INT8:    dst.int8     = rtmap_value.as<int8_t>(); ; break;
+                    case GGUF_TYPE_UINT16:  dst.uint16   = rtmap_value.as<uint16_t>(); break;
+                    case GGUF_TYPE_INT16:   dst.int16    = rtmap_value.as<int16_t>();  break;
+                    case GGUF_TYPE_UINT32:  dst.uint32   = rtmap_value.as<uint32_t>(); break;
+                    case GGUF_TYPE_INT32:   dst.int32    = rtmap_value.as<int32_t>();  break;
+                    case GGUF_TYPE_FLOAT32: dst.float32  = rtmap_value.as<float>();    break;
+                    case GGUF_TYPE_UINT64:  dst.uint64   = rtmap_value.as<uint64_t>(); break;
+                    case GGUF_TYPE_INT64:   dst.int64    = rtmap_value.as<int64_t>();  break;
+                    case GGUF_TYPE_FLOAT64: dst.float64  = rtmap_value.as<double>();   break;
+                    case GGUF_TYPE_BOOL:    dst.bool_    = rtmap_value.as<bool>();     break;
+                    case GGUF_TYPE_STRING: {
+                        std::string string_value = rtmap_value.as<std::string>();
+                        store.kv_value_string_storage.push_back(string_value);
+                        dst.str.n = string_value.length();
+                        dst.str.data = (char*) store.kv_value_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
+                        break;
+                    }
+                    default:
+                        return false;  // did not parse
+                }
+            return true; // parsed successfully
+        }
+
+        ov::Any get_any_associated_with_gguf_type(gguf_type g_type) {
+            switch (g_type) {
+                case GGUF_TYPE_UINT8:   return ov::Any(uint8_t());
+                case GGUF_TYPE_INT8:    return ov::Any(int8_t());  
+                case GGUF_TYPE_UINT16:  return ov::Any(uint16_t());
+                case GGUF_TYPE_INT16:   return ov::Any(int16_t()); 
+                case GGUF_TYPE_UINT32:  return ov::Any(uint32_t());
+                case GGUF_TYPE_INT32:   return ov::Any(int32_t()); 
+                case GGUF_TYPE_FLOAT32: return ov::Any(float());   
+                case GGUF_TYPE_UINT64:  return ov::Any(uint64_t());
+                case GGUF_TYPE_INT64:   return ov::Any(int64_t()); 
+                case GGUF_TYPE_FLOAT64: return ov::Any(double());  
+                case GGUF_TYPE_BOOL:    return ov::Any(bool());    
+                case GGUF_TYPE_STRING:  return ov::Any(std::string());
+                default:
+                    OPENVINO_THROW("Unknown gguf_type to turn into ov::Any");
+            }
+        }
+
+
         LlamaCppModel::LlamaCppModel(const std::shared_ptr<ov::Model>& model,
                       const std::shared_ptr<const ov::IPlugin>& plugin,
                       const ov::SoPtr<ov::IRemoteContext>& context,
@@ -238,6 +292,7 @@ namespace ov {
             auto rt_info = model->get_rt_info();
             OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
+            OPENVINO_ASSERT(rt_info.count("gguf_kv_array_types") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_name_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_tensor_shape_map") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_expected_tensor_shapes") != 0);
@@ -245,6 +300,7 @@ namespace ov {
 
             RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
             RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
+            RTMap& kv_array_types = model->get_rt_info<RTMap&>("gguf_kv_array_types");
             RTMap& tensor_name_map = model->get_rt_info<RTMap&>("gguf_tensor_name_map");
             RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("gguf_tensor_shape_map");
             RTMap& expected_tensor_shapes_map = model->get_rt_info<RTMap&>("gguf_expected_tensor_shapes");
@@ -257,44 +313,51 @@ namespace ov {
             OPENVINO_ASSERT(kv_params.size() == kv_types.size());
             size_t n_kv = kv_params.size();
             std::vector<gguf_kv> kv_vector;
+            ValueStorageForLifetimeExtension store;
 
-            std::list<std::string> kv_key_string_storage;
-            std::list<std::string> kv_value_string_storage;
             for (const auto& kv_pair: kv_params) {
                 gguf_kv kv;
 
                 const auto& key = kv_pair.first;
                 kv.key.n = key.length();
-                kv_key_string_storage.push_back(key);
-                kv.key.data = (char*) kv_key_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
+                store.kv_key_string_storage.push_back(key);
+                kv.key.data = (char*) store.kv_key_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
 
                 uint32_t value_type = kv_types[key].as<uint32_t>();
                 gguf_type gguf_value_type = (gguf_type) value_type;
                 kv.type = gguf_value_type;
-                switch (gguf_value_type) {
-                    case GGUF_TYPE_UINT8:   kv.value.uint8    = kv_pair.second.as<uint8_t>();  break;
-                    case GGUF_TYPE_INT8:    kv.value.int8     = kv_pair.second.as<int8_t>(); ; break;
-                    case GGUF_TYPE_UINT16:  kv.value.uint16   = kv_pair.second.as<uint16_t>(); break;
-                    case GGUF_TYPE_INT16:   kv.value.int16    = kv_pair.second.as<int16_t>();  break;
-                    case GGUF_TYPE_UINT32:  kv.value.uint32   = kv_pair.second.as<uint32_t>(); break;
-                    case GGUF_TYPE_INT32:   kv.value.int32    = kv_pair.second.as<int32_t>();  break;
-                    case GGUF_TYPE_FLOAT32: kv.value.float32  = kv_pair.second.as<float>();    break;
-                    case GGUF_TYPE_UINT64:  kv.value.uint64   = kv_pair.second.as<uint64_t>(); break;
-                    case GGUF_TYPE_INT64:   kv.value.int64    = kv_pair.second.as<int64_t>();  break;
-                    case GGUF_TYPE_FLOAT64: kv.value.float64  = kv_pair.second.as<double>();   break;
-                    case GGUF_TYPE_BOOL:    kv.value.bool_    = kv_pair.second.as<bool>();     break;
-                    case GGUF_TYPE_STRING: {
-                        std::string string_value = kv_pair.second.as<std::string>();
-                        kv_value_string_storage.push_back(string_value);
-                        kv.value.str.n = string_value.length();
-                        kv.value.str.data = (char*) kv_value_string_storage.back().c_str(); // TODO (vshampor) see equivalent case below
-                        break;
+                if (gguf_value_type != GGUF_TYPE_ARRAY) {
+                    bool is_parsed = maybe_parse_single_element(kv.type, kv_pair.second, kv.value, store);
+                    OPENVINO_ASSERT(is_parsed, "Invalid type of a GGUF kv-value");
+                }
+                else { // array case
+                    gguf_type element_type = (gguf_type) kv_array_types[key].as<uint32_t>();
+                    kv.value.arr.type = element_type;
+                    std::string serialized_array = kv_pair.second.as<std::string>();
+                    std::stringstream ss{serialized_array};
+                    std::vector<gguf_value> parsed_array;
+                    while (!ss.eof()) {
+                        gguf_value array_elt;
+                        ov::Any ov_any = get_any_associated_with_gguf_type(element_type);
+                        ov_any.read(ss);
+                        bool is_parsed = maybe_parse_single_element(element_type, ov_any, array_elt, store);
+                        OPENVINO_ASSERT(is_parsed);
+                        parsed_array.push_back(array_elt);
                     }
-                    case GGUF_TYPE_ARRAY:
-                        {
-                            OPENVINO_THROW("Array gguf kv params not supported yet");
-                        } break;
-                    default: OPENVINO_THROW("Invalid type of a GGUF kv-value");
+                    kv.value.arr.n = parsed_array.size();
+                    if (element_type == GGUF_TYPE_STRING) {
+                        // string element has already been lifetime-extended during parsing
+                        std::vector<char*> cstr_vector(parsed_array.size());
+                        for (size_t cstr_idx = 0; cstr_idx < parsed_array.size(); cstr_idx++) {
+                            cstr_vector[cstr_idx] = parsed_array[cstr_idx].str.data;
+                        }
+                        store.str_arr_storage.push_back(cstr_vector);
+                        kv.value.arr.data = store.str_arr_storage.back().data();
+                    }
+                    else {
+                        store.val_arr_storage.push_back(parsed_array);
+                        kv.value.arr.data = store.val_arr_storage.back().data();
+                    }
                 }
                 kv_vector.push_back(kv);
             }
