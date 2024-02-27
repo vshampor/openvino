@@ -18,9 +18,12 @@ namespace ov {
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties) const {
             std::cout << "VSHAMPOR: LlamaCppPlugin::compile_model" << std::endl;
+
+            std::string gpt2_node_name = "transformer.h.9.attn.c_proj.weight";
+            std::cout << "VSHAMPOR: sanity check - looking for node containing " << gpt2_node_name << std::endl;
             auto ops = model->get_ops();
-            auto iter = std::find_if(ops.begin(), ops.end(), [](const std::shared_ptr<ov::Node>& val) {
-                    return val->get_friendly_name().find("transformer.h.9.attn.c_proj.weight") != std::string::npos; });
+            auto iter = std::find_if(ops.begin(), ops.end(), [gpt2_node_name](const std::shared_ptr<ov::Node>& val) {
+                    return val->get_friendly_name().find(gpt2_node_name) != std::string::npos; });
             if (iter == ops.end()) {
                 std::cout << "VSHAMPOR: did not find the node\n";
             } else {
