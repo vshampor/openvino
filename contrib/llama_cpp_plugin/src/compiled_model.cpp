@@ -234,8 +234,54 @@ namespace ov {
         struct ValueStorageForLifetimeExtension {
             std::list<std::string> kv_key_string_storage;
             std::list<std::string> kv_value_string_storage;
-            std::list<std::vector<gguf_value>> val_arr_storage;
             std::list<std::vector<char*>> str_arr_storage;
+            void* store_gguf_value_vector(const std::vector<gguf_value>& vec, gguf_type g_type) {
+                size_t elt_size;
+                switch (g_type) {
+                    case GGUF_TYPE_UINT8:   elt_size = sizeof(uint8_t); break;
+                    case GGUF_TYPE_INT8:    elt_size = sizeof(int8_t); break;
+                    case GGUF_TYPE_UINT16:  elt_size = sizeof(uint16_t); break;
+                    case GGUF_TYPE_INT16:   elt_size = sizeof(int16_t); break;
+                    case GGUF_TYPE_UINT32:  elt_size = sizeof(uint32_t); break;
+                    case GGUF_TYPE_INT32:   elt_size = sizeof(int32_t); break;
+                    case GGUF_TYPE_FLOAT32: elt_size = sizeof(float); break;
+                    case GGUF_TYPE_UINT64:  elt_size = sizeof(uint64_t); break;
+                    case GGUF_TYPE_INT64:   elt_size = sizeof(int64_t); break;
+                    case GGUF_TYPE_FLOAT64: elt_size = sizeof(double); break;
+                    case GGUF_TYPE_BOOL:    elt_size = sizeof(bool); break;
+                default:
+                    OPENVINO_THROW("Unknown array type");
+                }
+                size_t size_in_bytes = vec.size() * elt_size;
+                void* mem_ptr = new char[size_in_bytes];
+                for (size_t i = 0; i < vec.size(); i++) {
+                    switch (g_type) {
+                        case GGUF_TYPE_UINT8:   ((uint8_t*) mem_ptr)[i] = vec[i].uint8;     break;
+                        case GGUF_TYPE_INT8:    ((int8_t*) mem_ptr)[i] = vec[i].int8;      break;
+                        case GGUF_TYPE_UINT16:  ((uint16_t*) mem_ptr)[i] = vec[i].uint16;    break;
+                        case GGUF_TYPE_INT16:   ((int16_t*) mem_ptr)[i] = vec[i].int16;     break;
+                        case GGUF_TYPE_UINT32:  ((uint32_t*) mem_ptr)[i] = vec[i].uint32;    break;
+                        case GGUF_TYPE_INT32:   ((int32_t*) mem_ptr)[i] = vec[i].int32;     break;
+                        case GGUF_TYPE_FLOAT32: ((float*) mem_ptr)[i] = vec[i].float32;   break;
+                        case GGUF_TYPE_UINT64:  ((uint64_t*) mem_ptr)[i] = vec[i].uint64;    break;
+                        case GGUF_TYPE_INT64:   ((int64_t*) mem_ptr)[i] = vec[i].int64;     break;
+                        case GGUF_TYPE_FLOAT64: ((double*) mem_ptr)[i] = vec[i].float64;   break;
+                        case GGUF_TYPE_BOOL:    ((bool*) mem_ptr)[i] = vec[i].bool_;     break;
+                    default:
+                        OPENVINO_THROW("Unknown array type");
+                    }
+                }
+                return mem_ptr;
+            }
+
+            ValueStorageForLifetimeExtension() = default;
+            ~ValueStorageForLifetimeExtension() {
+                for (void* ptr: non_str_raw_storage) {
+                    delete[] (char*) ptr;
+                }
+            }
+            private:
+            std::list<void*> non_str_raw_storage;
         };
 
         bool maybe_parse_single_element(gguf_type g_type, ov::Any rtmap_value, gguf_value& dst, ValueStorageForLifetimeExtension& store) {
@@ -339,7 +385,18 @@ namespace ov {
                     while (!ss.eof()) {
                         gguf_value array_elt;
                         ov::Any ov_any = get_any_associated_with_gguf_type(element_type);
-                        ov_any.read(ss);
+                        std::string token; ss >> token;
+                        if (std::string(kv.key.data) == "tokenizer.ggml.merges") {
+                            // tokenizer merges are pairs of tokens separated by whitespace, so need to read another to get a proper merge
+                            // TODO (vshampor): think of another delimiting strategy in the rt_info and use that strategy here for more robust code
+                            std::string another_token; ss >> another_token;
+                            token += std::string(" ") + another_token;
+                            ov_any = ov::Any::make<std::string>(token);
+                        }
+                        else {
+                            std::stringstream tok_ss{token};
+                            ov_any.read(tok_ss);
+                        }
                         bool is_parsed = maybe_parse_single_element(element_type, ov_any, array_elt, store);
                         OPENVINO_ASSERT(is_parsed);
                         parsed_array.push_back(array_elt);
@@ -355,8 +412,8 @@ namespace ov {
                         kv.value.arr.data = store.str_arr_storage.back().data();
                     }
                     else {
-                        store.val_arr_storage.push_back(parsed_array);
-                        kv.value.arr.data = store.val_arr_storage.back().data();
+                        void* data_ptr = store.store_gguf_value_vector(parsed_array, element_type);
+                        kv.value.arr.data = data_ptr;
                     }
                 }
                 kv_vector.push_back(kv);
