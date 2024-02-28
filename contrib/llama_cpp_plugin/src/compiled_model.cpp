@@ -335,6 +335,7 @@ namespace ov {
                       const ov::SoPtr<ov::IRemoteContext>& context,
                       const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
                       ) : ICompiledModel(model, plugin, context, task_executor) {
+            num_tokens_processed_ptr = new size_t; // TODO (vshampor): hack, remove
             auto rt_info = model->get_rt_info();
             OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);

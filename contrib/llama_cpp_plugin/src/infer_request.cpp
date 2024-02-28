@@ -73,7 +73,9 @@ namespace ov {
 
         for (size_t tok_idx = 0; tok_idx < sequence_length; ++tok_idx) {
             const int64_t token_id = sequence_start_ptr[tok_idx];
-            llama_batch_add_reimpl(batch, token_id, tok_idx, { 0 }, true); // the last `true` here is a marker that the logits for this token should be computed and returned
+            llama_batch_add_reimpl(batch, token_id, *(m_compiled_model_ptr->num_tokens_processed_ptr), { 0 }, true); // the last `true` here is a marker that the logits for this token should be computed and returned
+            size_t* ptr = m_compiled_model_ptr->num_tokens_processed_ptr;
+            (*ptr)++;
         }
 
         std::cout << "VSHAMPOR: single sequence from input batch added to llama_batch\n";

@@ -61,6 +61,7 @@ namespace ov {
 
             llama_model* m_llama_model_ptr = nullptr;
             llama_context* m_llama_ctx = nullptr;
+            size_t* num_tokens_processed_ptr = nullptr;  // TODO: (vshampor) find a better place for this kind of storage
 
         friend class ov::llama_cpp_plugin::LlamaCppSyncInferRequest;
         };
