@@ -1,6 +1,8 @@
 #include "plugin.hpp"
 #include "compiled_model.hpp"
 #include "openvino/op/constant.hpp"
+#include <openvino/runtime/properties.hpp>
+#include "openvino/runtime/internal_properties.hpp"
 
 
 namespace {
@@ -67,6 +69,12 @@ namespace ov {
         }
 
         ov::Any LlamaCppPlugin::get_property(const std::string& name, const ov::AnyMap& arguments) const {
+            if (ov::supported_properties == name) {
+                return decltype(ov::supported_properties)::value_type(std::vector<PropertyName>());
+            }
+            if (ov::internal::supported_properties == name) {
+                return decltype(ov::internal::supported_properties)::value_type(std::vector<PropertyName>());
+            }
             OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
         }
 
