@@ -58,7 +58,6 @@ namespace ov {
     }
 
     void LlamaCppSyncInferRequest::infer() {
-        std::cout << "VSHAMPOR: infer() called\n";
         auto input_ids_tensor_ptr = get_tensor(get_inputs()[0]); // TODO (vshampor) correctly identify input_ids among all inputs without hardcode
         OPENVINO_ASSERT(input_ids_tensor_ptr->get_element_type() == ov::element::Type_t::i64);
         OPENVINO_ASSERT(input_ids_tensor_ptr->get_shape().size() == 2);
@@ -78,12 +77,13 @@ namespace ov {
             (*ptr)++;
         }
 
-        std::cout << "VSHAMPOR: single sequence from input batch added to llama_batch\n";
 
         llama_context* ctx = m_compiled_model_ptr->m_llama_ctx;
         int32_t sts = llama_decode(ctx, batch);
 
-        std::cout << "VSHAMPOR: llama_decode returns " << sts << std::endl;
+        if (sts != 0) {
+            OPENVINO_THROW("llama_decode failed with code ", sts);
+        }
 
         size_t n_vocab = llama_n_vocab(m_compiled_model_ptr->m_llama_model_ptr);
 
@@ -94,22 +94,10 @@ namespace ov {
             float* logits_from_llama = llama_get_logits_ith(ctx, pos);
             std::copy(logits_from_llama, logits_from_llama + n_vocab, output_tensor_data_ptr + pos * n_vocab);
         }
-        // size_t n_output_elts = 10;
-        // std::cout << "VSHAMPOR: first " << n_output_elts << " logits from llama are:" << std::endl;
-
-        // for (size_t elt_idx = 0; elt_idx < n_output_elts; elt_idx++) {
-        //     std::cout << logits_from_llama[elt_idx] << " ";
-        // }
-        // std::cout << std::endl;
-
-
-        // std::cout << "VSHAMPOR: non-zero elts: " << std::count_if(logits_from_llama, logits_from_llama + n_vocab, [](float val) { return val != 0; }) << "/" << n_vocab  << std::endl;
-
 
         auto& logit_output = get_outputs()[0];
         allocate_tensor(logit_output, [&output_tensor](ov::SoPtr<ov::ITensor>& tensor) { allocate_tensor_impl(tensor, output_tensor.get_element_type(), output_tensor.get_shape());
                                                                                          output_tensor.copy_to(ov::make_tensor(tensor)); });
-        std::cout << "VSHAMPOR: output tensors allocated\n";
     };
     std::vector<ov::ProfilingInfo> LlamaCppSyncInferRequest::get_profiling_info() const {
         std::cout << "VSHAMPOR: get_profiling_info() called\n";
