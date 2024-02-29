@@ -151,8 +151,14 @@ namespace ov {
             return retval;
         }
 
+        void write_float_plus_one(std::ofstream& out, const float* src) {
+            float elt = *src;
+            elt += 1;
+            out.write((const char*) &elt, sizeof(float));
+        }
+
         void append_tensor_data_with_transpositions(const std::string& fname, const std::vector<gguf_tensor_info>& tensor_infos, const std::vector<void*>& tensor_data_ptrs,
-                const std::map<std::string, TransposePermutation>& transpositions) {
+                const std::map<std::string, TransposePermutation>& transpositions, const std::set<std::string> increment_by_one_tensor_names) {
              // assuming contiguous data underneath each pointer from tensor_data_ptrs
              OPENVINO_ASSERT(tensor_infos.size() == tensor_data_ptrs.size());
              std::ofstream out(fname, std::ios::app | std::ios::out);
@@ -162,10 +168,21 @@ namespace ov {
 
                 const char* ir_tensor_data = reinterpret_cast<char*>(tensor_data_ptrs[i]);
 
-                auto it = transpositions.find(std::string(tensor_info.name.data));
+                std::string tensor_llama_name = std::string(tensor_info.name.data);
+                auto it = transpositions.find(tensor_llama_name);
                 if (it == transpositions.end()) {
                     // original IR tensor should not be transposed to conform to GGUF expectations, can write as-is
-                    out.write(ir_tensor_data, tensor_info.size);
+                    if (increment_by_one_tensor_names.count(tensor_llama_name) != 0) { // gemma case
+                        size_t elt_size = sizeof(float); // FP32 only for now
+                        OPENVINO_ASSERT(!(tensor_info.size % elt_size));
+                        size_t num_elts = tensor_info.size / elt_size;
+                        for (size_t elt_idx = 0; elt_idx < num_elts; elt_idx++) {
+                            write_float_plus_one(out, ((float*) ir_tensor_data) + elt_idx);
+                        }
+                    }
+                    else {
+                        out.write(ir_tensor_data, tensor_info.size);
+                    }
                     continue;
                 }
 
@@ -222,7 +239,12 @@ namespace ov {
                             for (size_t dim_2 = 0; dim_2 < gguf_layout_shape_ex[2]; dim_2++)
                                 for (size_t dim_3 = 0; dim_3 < gguf_layout_shape_ex[3]; dim_3++) {
                                     current_offset = element_size * (dim_0 * permuted_strides[0] + dim_1 * permuted_strides[1] + dim_2 * permuted_strides[2] + dim_3 * permuted_strides[3]);
-                                    out.write(ir_tensor_data + current_offset, element_size);
+                                    if (increment_by_one_tensor_names.count(tensor_llama_name) != 0) { // gemma case
+                                        write_float_plus_one(out, (float*) ir_tensor_data + current_offset);
+                                    }
+                                    else {
+                                        out.write(ir_tensor_data + current_offset, element_size);
+                                    }
                                     num_bytes_written += element_size;
                                 }
                     std::cout << "VSHAMPOR: wrote " << num_bytes_written << std::endl;
@@ -525,8 +547,18 @@ namespace ov {
                 transpose_permutations[llama_name_and_permutation.first] = permutation;
             }
 
+            std::set<std::string> gemma_tensor_names_to_increment;
+
+            for (const auto& llama_name_and_rtinfo_name : tensor_name_map) {
+                const std::string& llama_name = llama_name_and_rtinfo_name.first;
+                const std::string& rtinfo_name = llama_name_and_rtinfo_name.second.as<std::string>();
+                std::string gemma_norm_suffix = "norm.weight";
+                if (rtinfo_name.size() < gemma_norm_suffix.size()) continue;
+                if (rtinfo_name.substr(rtinfo_name.size() - gemma_norm_suffix.size()) == gemma_norm_suffix) gemma_tensor_names_to_increment.insert(llama_name);
+            }
+
             std::cout << "VSHAMPOR: writing tensor data (blob with transpositions) " << std::endl;
-            append_tensor_data_with_transpositions(m_converted_gguf_file_name, tensor_infos, tensor_data_ptrs, transpose_permutations);
+            append_tensor_data_with_transpositions(m_converted_gguf_file_name, tensor_infos, tensor_data_ptrs, transpose_permutations, gemma_tensor_names_to_increment);
             std::cout << "VSHAMPOR: write finished." << m_converted_gguf_file_name << std::endl;
 
             std::cout << "VSHAMPOR: loading llama model from written file..." << std::endl;
