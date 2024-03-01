@@ -33,8 +33,8 @@ int main(int argc, char* argv[]) {
         int left_tensor_idx = gguf_find_tensor(left_ctx, tensor_name.c_str());
         int right_tensor_idx = gguf_find_tensor(right_ctx, tensor_name.c_str());
 
-        int left_tensor_offset = gguf_get_tensor_offset(left_ctx, left_tensor_idx) + left_ctx->offset;
-        int right_tensor_offset = gguf_get_tensor_offset(right_ctx, right_tensor_idx) + right_ctx->offset;
+        size_t left_tensor_offset = gguf_get_tensor_offset(left_ctx, left_tensor_idx) + left_ctx->offset;
+        size_t right_tensor_offset = gguf_get_tensor_offset(right_ctx, right_tensor_idx) + right_ctx->offset;
 
         gguf_tensor_info left_tensor_info = left_ctx->infos[left_tensor_idx];
         gguf_tensor_info right_tensor_info = right_ctx->infos[right_tensor_idx];

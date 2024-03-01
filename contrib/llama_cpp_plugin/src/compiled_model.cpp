@@ -442,6 +442,35 @@ namespace ov {
                 kv_vector.push_back(kv);
             }
 
+            auto token_types_kv_it = std::find_if(kv_vector.begin(), kv_vector.end(), [](const gguf_kv& val) { return std::string(val.key.data) == "tokenizer.ggml.token_type"; });
+            if (token_types_kv_it != kv_vector.end()) {
+                auto tokens_kv_it = std::find_if(kv_vector.begin(), kv_vector.end(), [](const gguf_kv& val) { return std::string(val.key.data) == "tokenizer.ggml.tokens"; });
+                if (tokens_kv_it != kv_vector.end()) {
+                    size_t expected_num_tokens = token_types_kv_it->value.arr.n;
+                    size_t actual_num_tokens = tokens_kv_it->value.arr.n;
+                    if (actual_num_tokens < expected_num_tokens) {
+                        std::cout << "VSHAMPOR: detected wrong vocab serialization/deserialization (expected " << expected_num_tokens << " tokens, parsed " << actual_num_tokens << " from vocab), filling tokens with bogus values" << std::endl;
+                        std::vector<char*> new_vocab;
+                        // char** old_vocab_data_ptr = (char**) tokens_kv_it->value.arr.data;
+                        // std::copy(old_vocab_data_ptr, old_vocab_data_ptr + actual_num_tokens, new_vocab.begin());
+                        // size_t extra_tokens_needed = expected_num_tokens - actual_num_tokens;
+                        size_t extra_tokens_needed = expected_num_tokens;
+                        for (size_t tok_idx = 0; tok_idx < extra_tokens_needed; tok_idx++) {
+                            std::stringstream ss;
+                            ss << "invalid_token_" << tok_idx;
+                            std::string new_token = ss.str();
+                            store.kv_value_string_storage.push_back(new_token);
+                            char* str_data_ptr = (char*) store.kv_value_string_storage.back().c_str();
+                            new_vocab.push_back(str_data_ptr);
+                        }
+                        OPENVINO_ASSERT(new_vocab.size() == expected_num_tokens);
+                        store.str_arr_storage.push_back(new_vocab);
+                        tokens_kv_it->value.arr.data = (void*) store.str_arr_storage.back().data();
+                        tokens_kv_it->value.arr.n = expected_num_tokens;
+                    }
+                }
+            }
+
             // tensors
             OPENVINO_ASSERT(tensor_name_map.size() == tensor_shape_map.size());
             size_t n_tensors_in_rtinfo = tensor_name_map.size();
@@ -548,14 +577,17 @@ namespace ov {
             }
 
             std::set<std::string> gemma_tensor_names_to_increment;
+            // FIXME (vshampor): tried setting up commands for incrementing *_norm.weight values by 1 like it is done
+            // during llama.cpp HF-to-GGUF export, but it seems that it isn't necessary and IR stores the incremented weights already
+            // Is this due to constant folding?
 
-            for (const auto& llama_name_and_rtinfo_name : tensor_name_map) {
-                const std::string& llama_name = llama_name_and_rtinfo_name.first;
-                const std::string& rtinfo_name = llama_name_and_rtinfo_name.second.as<std::string>();
-                std::string gemma_norm_suffix = "norm.weight";
-                if (rtinfo_name.size() < gemma_norm_suffix.size()) continue;
-                if (rtinfo_name.substr(rtinfo_name.size() - gemma_norm_suffix.size()) == gemma_norm_suffix) gemma_tensor_names_to_increment.insert(llama_name);
-            }
+            // for (const auto& llama_name_and_rtinfo_name : tensor_name_map) {
+            //     const std::string& llama_name = llama_name_and_rtinfo_name.first;
+            //     const std::string& rtinfo_name = llama_name_and_rtinfo_name.second.as<std::string>();
+            //     std::string gemma_norm_suffix = "norm.weight";
+            //     if (rtinfo_name.size() < gemma_norm_suffix.size()) continue;
+            //     if (rtinfo_name.substr(rtinfo_name.size() - gemma_norm_suffix.size()) == gemma_norm_suffix) gemma_tensor_names_to_increment.insert(llama_name);
+            // }
 
             std::cout << "VSHAMPOR: writing tensor data (blob with transpositions) " << std::endl;
             append_tensor_data_with_transpositions(m_converted_gguf_file_name, tensor_infos, tensor_data_ptrs, transpose_permutations, gemma_tensor_names_to_increment);
