@@ -56,7 +56,6 @@ namespace ov {
             return compile_model(model, properties, {});
         }
 
-
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties,
             const ov::SoPtr<ov::IRemoteContext>& context) const {
@@ -65,16 +64,38 @@ namespace ov {
         }
 
         void LlamaCppPlugin::set_property(const ov::AnyMap& properties) {
-            OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+            for (const auto& map_entry : properties) {
+                if (map_entry.first == ov::cache_dir.name()) {
+                    m_cache_dir = map_entry.second.as<std::string>();
+                }
+                else {
+                    OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: setting property ", map_entry.first, "not implemented");
+                }
+            }
         }
 
         ov::Any LlamaCppPlugin::get_property(const std::string& name, const ov::AnyMap& arguments) const {
             if (ov::supported_properties == name) {
-                return decltype(ov::supported_properties)::value_type(std::vector<PropertyName>());
+                return decltype(ov::supported_properties)::value_type(std::vector<PropertyName>({ov::cache_dir, ov::device::capabilities, ov::device::full_name}));
+            }
+            if (ov::device::capabilities == name) {
+                return decltype(ov::device::capabilities)::value_type(std::vector<std::string>({ov::device::capability::EXPORT_IMPORT}));
             }
             if (ov::internal::supported_properties == name) {
-                return decltype(ov::internal::supported_properties)::value_type(std::vector<PropertyName>());
+                return decltype(ov::internal::supported_properties)::value_type(std::vector<PropertyName>({ov::internal::caching_properties}));
             }
+
+            if (ov::cache_dir == name) {
+                return m_cache_dir;
+            }
+            if (ov::internal::caching_properties == name) {
+                return std::vector<ov::PropertyName>{ov::device::full_name};
+            }
+
+            if (ov::device::full_name == name) {
+                return std::string("LLAMA_CPP");
+            }
+
             OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
         }
 
@@ -84,10 +105,32 @@ namespace ov {
         ov::SoPtr<ov::IRemoteContext> LlamaCppPlugin::get_default_context(const ov::AnyMap& remote_properties) const {
             OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
         }
-        std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::import_model(std::istream& model,
+        std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::import_model(std::istream& model_file_stream,
             const ov::AnyMap& properties) const {
-            OPENVINO_THROW_NOT_IMPLEMENTED("VSHAMPOR: Not Implemented");
+            std::cout << "VSHAMPOR: importing model" << '\n';
+            std::cout << "VSHAMPOR: deserializing ov::Model first" << '\n';
+             // read XML content
+             std::string xmlString;
+             std::uint64_t dataSize = 0;
+             model_file_stream.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+             xmlString.resize(dataSize);
+             model_file_stream.read(const_cast<char*>(xmlString.c_str()), dataSize);
+
+             // read blob content
+             ov::Tensor weights;
+             model_file_stream.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+             if (0 != dataSize) {
+                 weights = ov::Tensor(ov::element::from<char>(), ov::Shape{static_cast<ov::Shape::size_type>(dataSize)});
+                 model_file_stream.read(weights.data<char>(), dataSize);
+             }
+
+             auto ov_model = get_core()->read_model(xmlString, weights);
+            std::cout << "VSHAMPOR: ov::Model deserialized, passing the rest of the stream to LlamaCppModel ctor" << '\n';
+            return std::make_shared<LlamaCppModel>(ov_model, model_file_stream, shared_from_this());
         }
+
+        const std::string CURRENT_GGUF_FILE_NAME = "current.gguf";
+        std::string LlamaCppPlugin::get_current_gguf_file_path() const { return m_cache_dir + "/" + CURRENT_GGUF_FILE_NAME; }
 
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::import_model(std::istream& model,
             const ov::SoPtr<ov::IRemoteContext>& context,

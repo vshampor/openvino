@@ -8,6 +8,7 @@
 namespace ov {
     namespace llama_cpp_plugin {
         class LlamaCppSyncInferRequest;
+        class LlamaCppPlugin;
         class LlamaCppModel: public ICompiledModel {
         public:
             LlamaCppModel(const std::shared_ptr<ov::Model>& model,
@@ -15,6 +16,10 @@ namespace ov {
                           const ov::SoPtr<ov::IRemoteContext>& context,
                           const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
                           );
+
+            LlamaCppModel(const std::shared_ptr<ov::Model>& ov_model,
+                          std::istream& input_file,
+                          const std::shared_ptr<const IPlugin>& plugin);
             /**
              * @brief Export compiled model to stream
              *
@@ -56,12 +61,14 @@ namespace ov {
             virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
 
         private:
+            std::string get_current_gguf_file_path() const;
             gguf_context* m_gguf_ctx = nullptr;
             std::string m_converted_gguf_file_name;
 
             llama_model* m_llama_model_ptr = nullptr;
             llama_context* m_llama_ctx = nullptr;
             size_t* num_tokens_processed_ptr = nullptr;  // TODO: (vshampor) find a better place for this kind of storage
+            std::shared_ptr<ov::Model> m_model;
 
         friend class ov::llama_cpp_plugin::LlamaCppSyncInferRequest;
         };

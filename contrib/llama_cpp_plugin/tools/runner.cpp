@@ -3,6 +3,7 @@
 
 int main(int argc, char* argv[]) {
     ov::Core core;
+    core.set_property(ov::cache_dir("/tmp/my_cache_dir"));
     std::string model_path = "/home/vshampor/work/optimum-intel/ov_model/openvino_model.xml";
 
     std::cout << "VSHAMPOR: reading model\n";

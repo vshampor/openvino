@@ -1,7 +1,10 @@
 #include "compiled_model.hpp"
+#include "plugin.hpp"
 #include "infer_request.hpp"
+#include <memory>
 #include <openvino/op/constant.hpp>
 #include <fstream>
+#include <openvino/runtime/properties.hpp>
 
 namespace ov {
     namespace llama_cpp_plugin {
@@ -357,7 +360,9 @@ namespace ov {
                       const ov::SoPtr<ov::IRemoteContext>& context,
                       const std::shared_ptr<ov::threading::ITaskExecutor>& task_executor
                       ) : ICompiledModel(model, plugin, context, task_executor) {
+            m_model = model;
             num_tokens_processed_ptr = new size_t; // TODO (vshampor): hack, remove
+            *num_tokens_processed_ptr = 0;
             auto rt_info = model->get_rt_info();
             OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
             OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
@@ -558,7 +563,9 @@ namespace ov {
 
             m_gguf_ctx = gguf_init_from_data(n_tensors, tensor_infos.data(), n_kv, kv_vector.data(), tensor_data_ptrs.data(), gguf_params);
 
-            m_converted_gguf_file_name = "/tmp/exported.gguf";
+            std::shared_ptr<const LlamaCppPlugin> llama_plugin_ptr = std::dynamic_pointer_cast<const LlamaCppPlugin>(plugin);
+            m_converted_gguf_file_name = llama_plugin_ptr->get_current_gguf_file_path();
+
             std::cout << "VSHAMPOR: output filename is  " << m_converted_gguf_file_name << std::endl;
             std::cout << "VSHAMPOR: writing metadata (GGUF header) " << std::endl;
             gguf_write_to_file(m_gguf_ctx, m_converted_gguf_file_name.c_str(), /* only_meta = */ true);
@@ -595,6 +602,7 @@ namespace ov {
 
             std::cout << "VSHAMPOR: loading llama model from written file..." << std::endl;
             llama_model_params mparams = llama_model_default_params();
+            mparams.n_gpu_layers = 99;
             m_llama_model_ptr = llama_load_model_from_file(m_converted_gguf_file_name.c_str(), mparams);
             llama_context_params cparams = llama_context_default_params();
             m_llama_ctx = llama_new_context_with_model(m_llama_model_ptr, cparams);
@@ -602,7 +610,50 @@ namespace ov {
             std::cout << "VSHAMPOR: llama model loaded successfully..." << std::endl;
         }
 
+
+        LlamaCppModel::LlamaCppModel(const std::shared_ptr<ov::Model>& ov_model, std::istream& input_stream, const std::shared_ptr<const IPlugin>& plugin) :
+            ICompiledModel(ov_model, plugin) {
+            num_tokens_processed_ptr = new size_t; // TODO (vshampor): hack, remove
+            *num_tokens_processed_ptr = 0;
+            std::shared_ptr<const LlamaCppPlugin> llama_plugin = std::dynamic_pointer_cast<const LlamaCppPlugin>(plugin);
+            std::string current_file_path = llama_plugin->get_current_gguf_file_path();
+            std::ofstream output_stream(current_file_path, std::ios::binary);
+            output_stream << input_stream.rdbuf();
+
+
+            std::cout << "VSHAMPOR: loading llama model from imported and re-written file..." << std::endl;
+            llama_model_params mparams = llama_model_default_params();
+            mparams.n_gpu_layers = 99;
+            m_llama_model_ptr = llama_load_model_from_file(current_file_path.c_str(), mparams);
+            llama_context_params cparams = llama_context_default_params();
+            m_llama_ctx = llama_new_context_with_model(m_llama_model_ptr, cparams);
+            std::cout << "VSHAMPOR: llama model loaded successfully from cache..." << std::endl;
+        }
+
         void LlamaCppModel::export_model(std::ostream& output_stream) const {
+            std::cout << "VSHAMPOR: exporting model" << std::endl;
+
+            // FIXME (vshampor): it's a shame that loading a model from cache does not have an option to
+            // actually keep the already loaded model from xml and not be forced to deserialize an ov::Model
+            // representation from cache as well. As it stands, will need to write the whole IR into the cache entry
+            // along with the GGUF file.
+            //
+            std::stringstream xmlFile, binFile;
+            ov::pass::Serialize serializer(xmlFile, binFile);
+            serializer.run_on_model(m_model);
+
+            auto m_constants = binFile.str();
+            auto m_model = xmlFile.str();
+
+            auto dataSize = static_cast<std::uint64_t>(m_model.size());
+            output_stream.write(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+            output_stream.write(m_model.c_str(), dataSize);
+
+            dataSize = static_cast<std::uint64_t>(m_constants.size());
+            output_stream.write(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+            output_stream.write(reinterpret_cast<char*>(&m_constants[0]), dataSize);
+
+
             std::ifstream in(m_converted_gguf_file_name, std::ios::binary);
             output_stream << in.rdbuf();
         }

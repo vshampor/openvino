@@ -97,6 +97,10 @@ namespace ov {
              */
             virtual ov::SupportedOpsMap query_model(const std::shared_ptr<const ov::Model>& model,
                 const ov::AnyMap& properties) const override;
+
+            std::string get_current_gguf_file_path() const;
+        private:
+            std::string m_cache_dir = "./";
         };
     }  // namespace llama_cpp_plugin
 }  // namespace ov
