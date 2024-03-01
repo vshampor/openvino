@@ -28,5 +28,5 @@ endif()
 # install
 
 if(OpenVINODeveloperPackage_FOUND)
-    ov_cpack(template)
+    ov_cpack(LlamaCppPlugin)
 endif()
