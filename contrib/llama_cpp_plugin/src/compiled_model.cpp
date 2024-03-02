@@ -364,23 +364,23 @@ namespace ov {
             num_tokens_processed_ptr = new size_t; // TODO (vshampor): hack, remove
             *num_tokens_processed_ptr = 0;
             auto rt_info = model->get_rt_info();
-            OPENVINO_ASSERT(rt_info.count("gguf_kv_params") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_kv_types") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_kv_array_types") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_tensor_name_map") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_tensor_shape_map") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_expected_tensor_shapes") != 0);
-            OPENVINO_ASSERT(rt_info.count("gguf_transpose_permutations") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_kv_params") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_kv_types") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_kv_array_types") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_tensor_name_map") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_tensor_shape_map") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_expected_tensor_shapes") != 0);
+            OPENVINO_ASSERT(rt_info.count("lcp_transpose_permutations") != 0);
 
-            RTMap& kv_params = model->get_rt_info<RTMap&>("gguf_kv_params");
-            RTMap& kv_types = model->get_rt_info<RTMap&>("gguf_kv_types");
-            RTMap& kv_array_types = model->get_rt_info<RTMap&>("gguf_kv_array_types");
-            RTMap& tensor_name_map = model->get_rt_info<RTMap&>("gguf_tensor_name_map");
-            RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("gguf_tensor_shape_map");
-            RTMap& expected_tensor_shapes_map = model->get_rt_info<RTMap&>("gguf_expected_tensor_shapes");
-            RTMap& transpose_permutations_rtmap = model->get_rt_info<RTMap&>("gguf_transpose_permutations");
+            RTMap& kv_params = model->get_rt_info<RTMap&>("lcp_kv_params");
+            RTMap& kv_types = model->get_rt_info<RTMap&>("lcp_kv_types");
+            RTMap& kv_array_types = model->get_rt_info<RTMap&>("lcp_kv_array_types");
+            RTMap& tensor_name_map = model->get_rt_info<RTMap&>("lcp_tensor_name_map");
+            RTMap& tensor_shape_map = model->get_rt_info<RTMap&>("lcp_tensor_shape_map");
+            RTMap& expected_tensor_shapes_map = model->get_rt_info<RTMap&>("lcp_expected_tensor_shapes");
+            RTMap& transpose_permutations_rtmap = model->get_rt_info<RTMap&>("lcp_transpose_permutations");
 
-            size_t gguf_version = model->get_rt_info<size_t>("gguf_version");
+            size_t gguf_version = model->get_rt_info<size_t>("lcp_gguf_version");
             std::cout << "VSHAMPOR: parsed gguf_version " << gguf_version << std::endl;
 
             // kv params
