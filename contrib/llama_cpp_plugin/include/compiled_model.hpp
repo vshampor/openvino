@@ -20,6 +20,9 @@ namespace ov {
             LlamaCppModel(const std::shared_ptr<ov::Model>& ov_model,
                           std::istream& input_file,
                           const std::shared_ptr<const IPlugin>& plugin);
+
+            LlamaCppModel(const std::string& gguf_fname,
+                          const std::shared_ptr<const IPlugin>& plugin);
             /**
              * @brief Export compiled model to stream
              *
@@ -50,8 +53,8 @@ namespace ov {
              *              virtual std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
             **/
             virtual ov::Any get_property(const std::string& name) const override;
-
-
+            virtual const std::vector<ov::Output<const ov::Node>>& inputs() const override;
+            virtual const std::vector<ov::Output<const ov::Node>>& outputs() const override;
         protected:
             /**
              * @brief Method creates infer request implementation
@@ -69,6 +72,9 @@ namespace ov {
             llama_context* m_llama_ctx = nullptr;
             size_t* num_tokens_processed_ptr = nullptr;  // TODO: (vshampor) find a better place for this kind of storage
             std::shared_ptr<ov::Model> m_model;
+
+            std::vector<ov::Output<const ov::Node>> m_fake_inputs;
+            std::vector<ov::Output<const ov::Node>> m_fake_outputs;
 
         friend class ov::llama_cpp_plugin::LlamaCppSyncInferRequest;
         };

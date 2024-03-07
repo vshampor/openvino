@@ -56,6 +56,9 @@ namespace ov {
             return compile_model(model, properties, {});
         }
 
+        std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::string& fname, const ov::AnyMap& properties) const {
+            return std::make_shared<LlamaCppModel>(fname, shared_from_this());
+        }
         std::shared_ptr<ov::ICompiledModel> LlamaCppPlugin::compile_model(const std::shared_ptr<const ov::Model>& model,
             const ov::AnyMap& properties,
             const ov::SoPtr<ov::IRemoteContext>& context) const {

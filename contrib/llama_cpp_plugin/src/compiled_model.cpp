@@ -3,6 +3,7 @@
 #include "infer_request.hpp"
 #include <memory>
 #include <openvino/op/constant.hpp>
+#include <openvino/opsets/opset13.hpp>
 #include <fstream>
 #include <openvino/runtime/properties.hpp>
 
@@ -630,6 +631,50 @@ namespace ov {
             std::cout << "VSHAMPOR: llama model loaded successfully from cache..." << std::endl;
         }
 
+        LlamaCppModel::LlamaCppModel(const std::string& gguf_fname, const std::shared_ptr<const IPlugin>& plugin) :
+            ICompiledModel(nullptr, plugin) {
+            num_tokens_processed_ptr = new size_t; // TODO (vshampor): hack, remove
+            *num_tokens_processed_ptr = 0;
+            std::cout << "VSHAMPOR: loading llama model directly from GGUF... " << std::endl;
+            llama_model_params mparams = llama_model_default_params();
+            mparams.n_gpu_layers = 99;
+            m_llama_model_ptr = llama_load_model_from_file(gguf_fname.c_str(), mparams);
+            llama_context_params cparams = llama_context_default_params();
+            m_llama_ctx = llama_new_context_with_model(m_llama_model_ptr, cparams);
+            std::cout << "VSHAMPOR: llama model loaded successfully from GGUF..." << std::endl;
+
+            auto input_ids = std::make_shared<ov::opset13::Parameter>(ov::element::Type_t::i64, ov::PartialShape({-1, -1}));
+            auto fake_convert = std::make_shared<ov::opset13::Convert>(input_ids->output(0), ov::element::Type_t::f32);
+            auto logits = std::make_shared<ov::opset13::Result>(fake_convert->output(0));
+
+            ov::ParameterVector inputs{input_ids};
+
+            std::vector<std::pair<std::string, ov::element::Type_t>> unused_names_in_order = { { "attention_mask", ov::element::Type_t::i64 },
+                                                                                               { "position_ids", ov::element::Type_t::i64 },
+                                                                                               { "beam_idx", ov::element::Type_t::i32 } };
+            for (const auto& descr : unused_names_in_order) {
+                auto unused_inp = std::make_shared<ov::opset13::Parameter>(descr.second, ov::PartialShape({-1, -1}));
+                inputs.push_back(unused_inp);
+            }
+
+            m_model = std::make_shared<ov::Model>(logits, inputs, "fake_ov_model_for_io_specification");
+
+            m_model->inputs()[0].set_names({"input_ids"});
+            for (size_t i = 0; i < unused_names_in_order.size(); i++) {
+                m_model->inputs()[i + 1].set_names({unused_names_in_order[i].first});
+            }
+
+            m_model->outputs()[0].set_names({"logits"});
+
+            for (auto input : m_model->inputs()) {
+                m_fake_inputs.emplace_back(input);
+            }
+            for (auto output : m_model->outputs()) {
+                m_fake_outputs.emplace_back(output);
+            }
+        }
+
+
         void LlamaCppModel::export_model(std::ostream& output_stream) const {
             std::cout << "VSHAMPOR: exporting model" << std::endl;
 
@@ -676,5 +721,12 @@ namespace ov {
         std::shared_ptr<ov::ISyncInferRequest> LlamaCppModel::create_sync_infer_request() const {
              return std::make_shared<LlamaCppSyncInferRequest>(std::static_pointer_cast<const LlamaCppModel>(shared_from_this()));
         }
+
+         const std::vector<ov::Output<const ov::Node>>& LlamaCppModel::inputs() const {
+             return m_fake_inputs;
+         };
+         const std::vector<ov::Output<const ov::Node>>& LlamaCppModel::outputs() const {
+             return m_fake_outputs;
+         };
     }
 }  // namespace ov

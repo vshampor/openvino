@@ -7,7 +7,7 @@ set -e
 # invoke the cmake configure and build stage separately for each llama.cpp backend type.
 
 BUILD_TYPE=$1
-COMMON_OPTS="-DOpenVINODeveloperPackage_DIR=/home/vshampor/work/openvino/build"
+COMMON_OPTS="-DOpenVINODeveloperPackage_DIR=/home/vshampor/work/openvino/build -DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 
 # Regular CPU build of llama.cpp
 cmake -S ./ -B ./build/cpu/ ${COMMON_OPTS} "$@"

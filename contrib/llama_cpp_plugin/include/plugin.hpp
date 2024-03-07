@@ -76,6 +76,10 @@ namespace ov {
             virtual std::shared_ptr<ov::ICompiledModel> import_model(std::istream& model,
                 const ov::AnyMap& properties) const override;
 
+
+            virtual std::shared_ptr<ov::ICompiledModel> compile_model(const std::string& fname,
+                const ov::AnyMap& properties) const override;
+
             /**
              * @brief Creates an compiled model from an previously exported model using plugin implementation
              *        and removes OpenVINO Runtime magic and plugin name
