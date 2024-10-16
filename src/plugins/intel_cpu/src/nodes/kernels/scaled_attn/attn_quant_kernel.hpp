@@ -9,6 +9,7 @@
 #include <vector>
 #include "openvino/core/type/element_type.hpp"
 #include "utils/plain_tensor.hpp"
+#include "common.hpp"
 
 namespace ov {
 namespace Extensions {

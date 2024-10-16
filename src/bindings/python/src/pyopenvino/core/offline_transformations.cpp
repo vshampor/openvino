@@ -132,14 +132,20 @@ void regmodule_offline_transformations(py::module m) {
 
     m_offline_transformations.def(
         "paged_attention_transformation",
-        [](std::shared_ptr<ov::Model> model, bool use_block_indices_inputs, bool use_score_outputs) {
+        [](std::shared_ptr<ov::Model> model,
+           bool use_block_indices_inputs,
+           bool use_score_outputs,
+           bool allow_cache_rotation) {
             ov::pass::Manager manager;
-            manager.register_pass<ov::pass::SDPAToPagedAttention>(use_block_indices_inputs, use_score_outputs);
+            manager.register_pass<ov::pass::SDPAToPagedAttention>(use_block_indices_inputs,
+                                                                  use_score_outputs,
+                                                                  allow_cache_rotation);
             manager.run_passes(model);
         },
         py::arg("model"),
         py::arg("use_block_indices_inputs") = false,
-        py::arg("use_score_outputs") = false);
+        py::arg("use_score_outputs") = false,
+        py::arg("allow_cache_rotation") = false);
 
     m_offline_transformations.def(
         "stateful_to_stateless_transformation",
