@@ -1566,7 +1566,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         }
 
         if (rotated_block_indices) {
-            rotation_coefficients.assert_dims({block_size * rotated_block_indices.size(0)});
+            rotation_coefficients.assert_dims({ H * rotated_block_indices.size(0) * block_size });
         }
         output_emb.assert_dims({B_token, H * S});
         output_emb = output_emb.reshape({B_token, 1, H * S});
