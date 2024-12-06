@@ -29,6 +29,6 @@ public:
                            bool use_per_layer_block_indices_inputs,
                            bool use_score_outputs,
                            bool allow_cache_rotation,
-                           ParameterVector& rotation_coefficients_inputs_for_each_layer,
-                           ParameterVector& rotated_block_indices_inputs_for_each_layer);
+                           ParameterVector& rotated_block_indices_inputs_for_each_layer,
+                           ParameterVector& rotation_deltas_inputs_for_each_layer);
 };
