@@ -279,7 +279,8 @@ struct paged_attention_impl : multi_stage_primitive<paged_attention> {
             } else if (kernel_idx == 5) {
                 // Output scores calculation kernel
                 args.inputs = { instance.past_lens_memory_ptr(),
-                                instance.subsequence_begins_memory_ptr() };
+                                instance.subsequence_begins_memory_ptr(),
+                                instance.score_aggregation_window_ptr() };
             }
 
             args.outputs = { instance.output_memory_ptr(0) };

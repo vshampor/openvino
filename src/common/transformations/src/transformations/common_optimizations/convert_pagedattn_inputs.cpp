@@ -35,6 +35,7 @@ ov::pass::ConvertPagedAttnInputs::ConvertPagedAttnInputs(const KVCacheConfig& co
     auto sliding_window = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
     auto alibi_slopes = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
     auto max_context_len = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
+    auto score_aggregation_window = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
     auto rotated_block_indices = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
     auto rotation_deltas = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
     auto rotation_trig_lut = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
@@ -68,7 +69,8 @@ ov::pass::ConvertPagedAttnInputs::ConvertPagedAttnInputs(const KVCacheConfig& co
                                                           max_context_len,
                                                           rotated_block_indices,
                                                           rotation_deltas,
-                                                          rotation_trig_lut});
+                                                          rotation_trig_lut,
+                                                          score_aggregation_window});
     auto result = pa_1 | pa_2;
     ov::matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         const auto pa_op = m.get_match_root();

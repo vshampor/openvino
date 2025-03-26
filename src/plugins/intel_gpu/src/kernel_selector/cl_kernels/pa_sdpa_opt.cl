@@ -63,6 +63,9 @@ KERNEL(pa_sdpa_opt)(
 #if HAS_ALIBI
     const __global ALIBI_INPUT_TYPE* alibi_slopes,
 #endif
+#if HAS_SCORE_AGGREGATION_WINDOW
+    const __global SCALE_AGGREGATION_WINDOW_TYPE* scale_aggregation_window,
+#endif
     __global OUTPUT_TYPE* output,
 #if PAGED_ATTENTION_SCORES_OUTPUT
     __global SOFTMAX_ACCUMULATOR_TYPE* softmax_results,
@@ -83,6 +86,7 @@ KERNEL(pa_sdpa_opt)(
     // subsequence_begins: [sequences_num + 1]
     // block_indices: [used_blocks_num]
     // block_indices_begins: [sequences_num + 1]
+    // score_aggregation_window [sequences_num]
     // rotated_block_indices: [num_rotated_blocks ]
     // rotation_deltas [num_rotated_blocks, 1 || PAGED_ATTENTION_BLOCK_SIZE ]
     // rotation_trig_lut [MAX_CONTEXT_LEN, HEAD_SIZE]

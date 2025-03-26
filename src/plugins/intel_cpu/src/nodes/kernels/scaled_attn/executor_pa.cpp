@@ -2366,7 +2366,8 @@ struct MHA {
                     const PlainTensor& subsequence_begins,
                     const PlainTensor& block_indices,
                     const PlainTensor& block_indices_begins,
-                    const PlainTensor& alibi_slopes) {
+                    const PlainTensor& alibi_slopes,
+                    const PlainTensor& score_aggregation_window) {
         _workitems.reset(query, past_lens, subsequence_begins, _helper._block_size);
         if (output_score) {
             _helper.init_score_buffers(past_lens, subsequence_begins);
@@ -2430,6 +2431,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
               size_t& sliding_window,
               PlainTensor& alibi_slopes,
               size_t& max_context_len,
+              PlainTensor& score_aggregation_window,
               PlainTensor& rotated_block_indices,
               PlainTensor& rotation_deltas,
               PlainTensor& rotation_trig_lut,
@@ -2450,6 +2452,10 @@ struct AttentionExecutor : public PagedAttentionExecutor {
             alibi_slopes.reset(inputs[ID_ALIBI_SLOPES]);
         }
         max_context_len = static_cast<size_t>(*inputs[ID_MAX_CONTEXT_LEN]->getDataAs<int32_t>());
+
+        if (!inputs[ID_SCORE_AGGREGATION_WINDOW]->getShape().hasZeroDims()) {
+            score_aggregation_window.reset(inputs[ID_SCORE_AGGREGATION_WINDOW]);  // [num_blocks]
+        }
 
         size_t inputs_size = inputs.size();
         if (inputs_size > ID_ROTATED_BLOCK_INDICES) {
@@ -2555,6 +2561,10 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         }
         if (alibi_slopes) {
             alibi_slopes.assert_dims({H});
+        }
+
+        if (score_aggregation_window) {
+            score_aggregation_window.assert_dims({B_seq});
         }
 
         bool init_rotation_coefficient_scratch = false;
@@ -2674,6 +2684,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         PlainTensor rotated_block_indices;
         PlainTensor rotation_deltas;
         PlainTensor rotation_trig_lut;
+        PlainTensor score_aggregation_window;
 
         PlainTensor output_emb;
         PlainTensor output_score;
@@ -2693,6 +2704,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
              sliding_window,
              alibi_slopes,
              max_context_len,
+             score_aggregation_window,
              rotated_block_indices,
              rotation_deltas,
              rotation_trig_lut,
@@ -2719,7 +2731,8 @@ struct AttentionExecutor : public PagedAttentionExecutor {
                 subsequence_begins,
                 block_indices,
                 block_indices_begins,
-                alibi_slopes);
+                alibi_slopes,
+                score_aggregation_window);
     }
 };
 #endif
